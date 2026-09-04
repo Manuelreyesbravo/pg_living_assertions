@@ -1,0 +1,8 @@
+# pg_living_assertions extension
+comment = 'A registry of things you claim are true, with the SQL that proves them and the date they were last proven'
+default_version = '0.1.0'
+relocatable = false
+schema = living_assertions
+# No requires and no shared library: it stores SQL and runs it in a STABLE
+# context. That is deliberate -- the database that most needs its guarantees
+# audited is usually the one where getting a C extension approved is hardest.
