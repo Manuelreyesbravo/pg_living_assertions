@@ -119,6 +119,30 @@ SELECT detail FROM status WHERE name = 'with_detail';
  only 3 of the 5 expected rows
 (1 row)
 
+-- REGRESSION: `detail` is optional, so the evaluator retries without it when
+-- the column is missing. If the missing column is in the CALLER's own query
+-- instead, the retry must raise again and be reported -- not swallowed as "this
+-- check simply has no detail". Until now that was only argued in a comment.
+-- The proof is that the message names the caller's column.
+SELECT declare('bad_column', 'names a column that does not exist',
+               'select x.nope as holds from (select 1) x') > 0 AS declared;
+ declared 
+----------
+ t
+(1 row)
+
+SELECT state('bad_column') AS must_be_erroring;
+ must_be_erroring 
+------------------
+ erroring
+(1 row)
+
+SELECT detail LIKE '%nope%' AS blames_the_real_column FROM status WHERE name = 'bad_column';
+ blames_the_real_column 
+------------------------
+ t
+(1 row)
+
 -- ---------------------------------------------------------------- the age --
 -- The thesis in one assertion: a verdict never travels without its age.
 SELECT count(*) FILTER (WHERE age IS NULL AND state <> 'unchecked') AS verdicts_with_no_age
@@ -240,6 +264,7 @@ SELECT name, last_state_before, what_happened FROM renegotiated ORDER BY name;
 SELECT name, (checked_at IS NULL) AS never_checked FROM stale('0 seconds') ORDER BY name;
     name     | never_checked 
 -------------+---------------
+ bad_column  | f
  false_one   | f
  five_rows   | f
  never_run   | t
@@ -247,7 +272,7 @@ SELECT name, (checked_at IS NULL) AS never_checked FROM stale('0 seconds') ORDER
  typo        | f
  with_detail | f
  writes      | f
-(7 rows)
+(8 rows)
 
 SELECT name, why FROM stale('100 years') ORDER BY name;
    name    |      why      
