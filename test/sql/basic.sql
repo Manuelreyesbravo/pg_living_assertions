@@ -47,6 +47,16 @@ SELECT declare('with_detail', 'carries its own explanation',
                $$select false as holds, 'only 3 of the 5 expected rows' as detail$$) > 0 AS declared;
 SELECT detail FROM status WHERE name = 'with_detail';
 
+-- REGRESSION: `detail` is optional, so the evaluator retries without it when
+-- the column is missing. If the missing column is in the CALLER's own query
+-- instead, the retry must raise again and be reported -- not swallowed as "this
+-- check simply has no detail". Until now that was only argued in a comment.
+-- The proof is that the message names the caller's column.
+SELECT declare('bad_column', 'names a column that does not exist',
+               'select x.nope as holds from (select 1) x') > 0 AS declared;
+SELECT state('bad_column') AS must_be_erroring;
+SELECT detail LIKE '%nope%' AS blames_the_real_column FROM status WHERE name = 'bad_column';
+
 -- ---------------------------------------------------------------- the age --
 -- The thesis in one assertion: a verdict never travels without its age.
 SELECT count(*) FILTER (WHERE age IS NULL AND state <> 'unchecked') AS verdicts_with_no_age

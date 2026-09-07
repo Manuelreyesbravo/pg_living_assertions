@@ -182,7 +182,18 @@ in a runbook, or in a monitor that only knows OK and CRITICAL.
 ```
 make install
 make installcheck   # needs a running server
+make check-dump     # does the registry survive pg_dump + restore?
 ```
+
+`check-dump` is separate because `pg_regress` cannot shell out to `pg_dump`, and
+the claim that the registry survives a restore is too central to leave
+unverified. It checks that the assertions, their **last verdicts**, the retire
+reasons and the supersede chain all come out the other side.
+
+**`pg_dump` warns about a circular foreign key on `assertions`.** It is the self
+reference in `supersedes`, and it is real: a `--data-only` dump may need
+`--disable-triggers`. A normal full dump restores cleanly, chain included, and
+that is what `check-dump` exercises.
 
 Pure SQL: no shared library, no dependencies. The database that most needs its
 guarantees audited is usually the one where getting a C extension approved is
