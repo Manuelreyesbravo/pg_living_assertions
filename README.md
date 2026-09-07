@@ -95,6 +95,36 @@ waiting.
 This is the whole thesis in one view: a stale `holds` looks exactly like a fresh
 one and means something completely different.
 
+## `declare_unchanged` -- approve what something says today
+
+"Approve what this expression evaluates to now, and tell me when it changes" is
+the shape a guard keeps writing:
+
+```sql
+SELECT living_assertions.declare_unchanged(
+    'the_columns_my_api_returns',
+    'the shape of this view is what the client was built against',
+    $$select string_agg(attname, ',' ORDER BY attnum)
+        from pg_attribute where attrelid = 'public.api_v1'::regclass and attnum > 0$$);
+```
+
+It takes the **expression**, not the value. A stored value would be compared
+against itself forever -- a check that can never fail and therefore never
+protects anything. A wrong expression raises here, at approval time, rather
+than being stored and reported as broken forever after.
+
+**It compares the TEXT of the value, and making that text canonical is your
+job.** `jsonb` already normalises key order; an array does not; a float renders
+however it renders. Two worlds you consider equivalent have to render the same,
+and only you know what "the same" means -- which is why the registry refuses to
+decide it for you.
+
+This arrived in 0.2.0 because a measurement said the first port had not saved
+enough: `pg_grammar_guard` had moved its baseline and its drift here and then
+rebuilt those three steps by hand, and `pg_plan_guard` writes the same three for
+plan advice. The duplication had moved up a level rather than gone. The metric
+was not wrong; the port was not finished.
+
 ## An assertion is not renegotiated in place
 
 Recording a declaration date buys nothing if `UPDATE` is allowed: softening an

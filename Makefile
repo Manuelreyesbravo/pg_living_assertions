@@ -1,5 +1,7 @@
 EXTENSION    = pg_living_assertions
-DATA         = pg_living_assertions--0.1.0.sql
+DATA         = pg_living_assertions--0.1.0.sql \
+               pg_living_assertions--0.2.0.sql \
+               pg_living_assertions--0.1.0--0.2.0.sql
 PG_CONFIG   ?= pg_config
 
 # One installcheck, no dependencies -- the same lesson the rest of the family
