@@ -1,7 +1,11 @@
 EXTENSION    = pg_living_assertions
 DATA         = pg_living_assertions--0.1.0.sql \
                pg_living_assertions--0.2.0.sql \
-               pg_living_assertions--0.1.0--0.2.0.sql
+               pg_living_assertions--0.3.0.sql \
+               pg_living_assertions--0.1.0--0.2.0.sql \
+               pg_living_assertions--0.4.0.sql \
+               pg_living_assertions--0.2.0--0.3.0.sql \
+               pg_living_assertions--0.3.0--0.4.0.sql
 PG_CONFIG   ?= pg_config
 
 # One installcheck, no dependencies -- the same lesson the rest of the family
@@ -17,6 +21,13 @@ include $(PGXS)
 # that is the central promise of the persistence half. pg_regress cannot shell
 # out to pg_dump, so it lives here instead of in installcheck -- a real gap in
 # coverage, given a name rather than left implicit.
+# Who may store SQL that somebody else will execute. Separate from installcheck
+# because pg_regress runs everything as one role, and this is about what a
+# DIFFERENT role can do. Needs rights to create roles and databases.
+.PHONY: check-privs
+check-privs:
+	@PSQL=$(shell $(PG_CONFIG) --bindir)/psql ./test/privilegios.sh
+
 .PHONY: check-dump
 check-dump:
 	@PSQL=$(shell $(PG_CONFIG) --bindir)/psql \

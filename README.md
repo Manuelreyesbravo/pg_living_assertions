@@ -194,6 +194,38 @@ And it works outside the LLM tooling it came from, which is the test of whether
 it is a piece: a DBA has dozens of living assertions today, kept in their head,
 in a runbook, or in a monitor that only knows OK and CRITICAL.
 
+## Who may store SQL that someone else will run
+
+This registry stores SQL and later runs it **as whoever calls `run()`**. Nothing
+here is `SECURITY DEFINER`, so a check runs with the caller's privileges -- and
+the caller is usually a cron job owned by someone with more rights than whoever
+wrote the check.
+
+> **Whoever can `INSERT` into `assertions` can run arbitrary SQL as every future
+> caller of `run_all()`.** Grant it the way you grant `cron.schedule`.
+
+That is not a bug, it is the shape of the feature. It is stated here because a
+registry of stored SQL that does not say it out loud is a footgun with good
+manners.
+
+**It is closed by default, and that is verified rather than assumed.** A role
+with `USAGE` on the schema still gets `permission denied for table assertions`,
+because the `INSERT` runs as them and an extension's tables belong to its owner.
+Since 0.3.0 the write functions are also revoked from `PUBLIC` -- a second gate
+that changes nothing today and matters the day somebody grants table privileges
+without thinking about what that implies.
+
+`make check-privs` proves both directions: a stranger cannot declare or read,
+the role you deliberately granted can, **and the escalation is demonstrated** --
+the trusted role stores a check, the owner's cron runs it, and it reads what the
+owner can read. Shown rather than described, so nobody grants it believing they
+are granting less.
+
+One thing that is **not** a boundary: the evaluator runs with a fixed
+`search_path`, so an unqualified name will not resolve. That limits accidental
+damage. Qualifying a name costs eight characters, so do not mistake it for
+protection.
+
 ## What it does not do
 
 - **It does not make anything correct.** It tells you whether something you
