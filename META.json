@@ -2,7 +2,7 @@
    "name": "pg_living_assertions",
    "abstract": "A registry of things you claim are true, with the SQL that proves them and the date they were last proven",
    "description": "PostgreSQL says in its own catalog that this piece is missing: CREATE ASSERTION answers 'is not yet implemented' and information_schema.sql_features lists F521 Assertions as NO, since SQL-92. This is not that feature. SQL-92 assertions are constraints on data, evaluated on every write; these are assertions about the state of the system, evaluated when you ask. The thesis is that a guarantee with no date of last check is a belief. The catalog stores state -- indisvalid, convalidated, tgenabled -- and never records when anyone last verified that the guarantee still applies, and the failure mode is never loud: the index stays marked UNIQUE while duplicates go in, the plan keeps returning rows, the vector index keeps returning k neighbours, and nothing errors. Each assertion declares what it claims in prose, the SQL that proves it, who approved it, and when it was last checked with what result. The check runs inside a STABLE function, so PostgreSQL itself forbids it from writing rather than a comment asking it not to. Results have six answers and the extra ones are the point: holds, broken, unknown (ran and could not decide -- not false), erroring (the check itself is failing -- a defect, not a false claim), unchecked (nobody ever looked -- not a clean bill of health), and unregistered (nothing by that name is watched, returned instead of an empty result). An assertion cannot be edited in place: it is superseded, which costs writing down why and leaves the change dated, and a view reports replacements made after the predecessor had already gone broken. Every report carries the age of the verdict alongside it, because a stale holds reads exactly like a fresh one.",
-   "version": "0.2.0",
+   "version": "0.4.0",
    "maintainer": [
       "Manuel Reyes <manuelreyesbravo@gmail.com>"
    ],
@@ -10,9 +10,9 @@
    "provides": {
       "pg_living_assertions": {
          "abstract": "Register what you believe is true, with the SQL that proves it and the date it was last proven",
-         "file": "pg_living_assertions--0.2.0.sql",
+         "file": "pg_living_assertions--0.4.0.sql",
          "docfile": "README.md",
-         "version": "0.2.0"
+         "version": "0.4.0"
       }
    },
    "prereqs": {
