@@ -25,12 +25,24 @@ include $(PGXS)
 # Who may store SQL that somebody else will execute. Separate from installcheck
 # because pg_regress runs everything as one role, and this is about what a
 # DIFFERENT role can do. Needs rights to create roles and databases.
+# The throwaway cluster the script suites default to. They create and drop roles
+# and databases, so they must not run against whatever server the environment
+# happens to point at -- the author ran them against a production cluster once,
+# following this project's own documentation.
+.PHONY: cluster cluster-stop
+cluster:
+	@PG_CONFIG=$(PG_CONFIG) bash ./test/cluster.sh init
+	@PG_CONFIG=$(PG_CONFIG) bash ./test/cluster.sh start
+
+cluster-stop:
+	@PG_CONFIG=$(PG_CONFIG) bash ./test/cluster.sh stop
+
 .PHONY: check-privs
 check-privs:
-	@PSQL=$(shell $(PG_CONFIG) --bindir)/psql ./test/privilegios.sh
+	@PSQL=$(shell $(PG_CONFIG) --bindir)/psql bash ./test/privilegios.sh
 
 .PHONY: check-dump
 check-dump:
 	@PSQL=$(shell $(PG_CONFIG) --bindir)/psql \
 	 PGDUMP=$(shell $(PG_CONFIG) --bindir)/pg_dump \
-	 ./test/dump_restore.sh
+	 bash ./test/dump_restore.sh

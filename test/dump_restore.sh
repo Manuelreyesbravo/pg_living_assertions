@@ -9,26 +9,33 @@
 # Not part of installcheck because pg_regress cannot shell out to pg_dump. That
 # is a real gap, stated instead of hidden: run `make check-dump`.
 #
-#   PGHOST=127.0.0.1 PGPORT=5435 ./test/dump_restore.sh
+# THIS SCRIPT CREATES AND DROPS DATABASES. It runs against the throwaway cluster
+# of test/cluster.sh and nothing else by default, its names carry the extension's
+# prefix, and test/guardia.sh stops it if one of those names already exists
+# instead of dropping a database it did not create.
+#
+#   PG_CONFIG=/path/to/pg_config test/cluster.sh init
+#   PG_CONFIG=/path/to/pg_config test/cluster.sh start
+#   PG_CONFIG=/path/to/pg_config test/dump_restore.sh
 
 set -euo pipefail
 
-PSQL=${PSQL:-psql}
+source "$(dirname "${BASH_SOURCE[0]}")/guardia.sh"
+
 PGDUMP=${PGDUMP:-pg_dump}
-ORIGEN=${ORIGEN:-la_dumpeada}
-DESTINO=${DESTINO:-la_restaurada}
-VOLCADO=$(mktemp /tmp/living_assertions_dump.XXXXXX.sql)
+ORIGEN=living_assertions_test_origen
+DESTINO=living_assertions_test_destino
+VOLCADO=$(mktemp "${TMPDIR:-/tmp}/living_assertions_dump.XXXXXX.sql")
 
 limpiar() {
-    $PSQL -d postgres -q -c "drop database if exists $ORIGEN" >/dev/null 2>&1 || true
-    $PSQL -d postgres -q -c "drop database if exists $DESTINO" >/dev/null 2>&1 || true
+    soltar_lo_reclamado
     rm -f "$VOLCADO"
 }
 trap limpiar EXIT
-limpiar
 
-$PSQL -d postgres -q -c "create database $ORIGEN"
-$PSQL -d postgres -q -c "create database $DESTINO"
+exige_cluster
+reclamar_base "$ORIGEN"
+reclamar_base "$DESTINO"
 
 # ------------------------------------------------------------- the origin --
 $PSQL -d "$ORIGEN" -q -v ON_ERROR_STOP=1 <<'SQL'

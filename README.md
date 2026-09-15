@@ -243,9 +243,27 @@ protection.
 
 ```
 make install
+make cluster        # a throwaway cluster, on port 5498, for the suites below
 make installcheck   # needs a running server
 make check-dump     # does the registry survive pg_dump + restore?
+make check-privs    # who may store SQL that somebody else will execute
+make cluster-stop
 ```
+
+**`check-dump` and `check-privs` create and drop roles and databases**, so they
+run against the throwaway cluster of `test/cluster.sh` and not against whatever
+server the environment points at. Until this was written, their headers
+documented running them with `PGPORT` aimed at a real server, their names were
+generic (`vigilante`, `la_dumpeada`), and they dropped those names on the way
+in: anyone with a monitoring role called `vigilante` would have lost it, grants
+included, by following this page. The author ran them against a production
+cluster and left a database behind, which is how it was found.
+
+Three things guard that now, and the third is the one that holds if you point
+`PGHOST` somewhere by hand: the suites default to the throwaway cluster, their
+names carry the extension's prefix, and **they refuse to drop anything they did
+not create** -- if one of those names already exists the suite stops instead of
+removing it.
 
 `check-dump` is separate because `pg_regress` cannot shell out to `pg_dump`, and
 the claim that the registry survives a restore is too central to leave
