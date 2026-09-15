@@ -7,3 +7,8 @@ test/regression.diffs
 test/regression.out
 *.o
 *.so
+
+# The throwaway cluster test/cluster.sh builds, and the uv cache the harness
+# needs inside the project because the tree's jail does not reach ~/.cache.
+.testcluster
+.uv-cache
