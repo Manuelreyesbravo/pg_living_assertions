@@ -1,6 +1,6 @@
 # pg_living_assertions extension
 comment = 'A registry of things you claim are true, with the SQL that proves them and the date they were last proven'
-default_version = '0.4.0'
+default_version = '0.4.1'
 relocatable = false
 schema = living_assertions
 # No requires and no shared library: it stores SQL and runs it in a STABLE
