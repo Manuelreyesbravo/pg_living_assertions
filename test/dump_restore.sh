@@ -117,6 +117,17 @@ comparar "and still says why" "$MOTIVO_ANTES" "$MOTIVO_DESPUES"
 comparar "the supersede chain survives the circular FK" "$CADENA_ANTES" "$CADENA_DESPUES"
 comparar "and renegotiated still sees it" "$RENEG_ANTES" "$RENEG_DESPUES"
 
+# This script used to stop at the comparisons above, and that is how 0.4.0 shipped
+# a registry that did not work after a restore: every row came back and the
+# IDENTITY sequences started again at 1, so the first check run afterwards died on
+# checks_pkey. Counting rows proves they came back; running a check and declaring
+# an assertion proves the registry still WORKS. Found by pg_agent_gate's dump test,
+# not by this one.
+RUN_TRAS=$($PSQL -d "$DESTINO" -tAc "select state from living_assertions.run('survives_the_restore')" 2>&1 || true)
+comparar "a check still runs after the restore" "holds" "$RUN_TRAS"
+NUEVA=$($PSQL -d "$DESTINO" -tAc "select living_assertions.declare('declared_after_the_restore', 'a new claim on the restored registry', 'select true as holds') > 0" 2>&1 || true)
+comparar "a new assertion can be declared after the restore" "t" "$NUEVA"
+
 if [ "$fallos" -ne 0 ]; then
     echo "$fallos check(s) failed: the registry does NOT survive a restore intact"
     exit 1
