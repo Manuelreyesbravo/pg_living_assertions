@@ -12,7 +12,7 @@
          "abstract": "Register what you believe is true, with the SQL that proves it and the date it was last proven",
          "file": "pg_living_assertions--0.4.0.sql",
          "docfile": "README.md",
-         "version": "0.4.0"
+         "version": "0.4.1"
       }
    },
    "prereqs": {
