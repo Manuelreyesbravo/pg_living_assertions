@@ -239,6 +239,21 @@ protection.
   direction -- loud beats silent -- but it means orphans need retiring by hand.
 - **`unknown` is not a diagnosis.** It says the check could not decide, not why.
 
+## Tested on
+
+Measured on 2026-09-16, not assumed: `make installcheck` was run against each
+of these releases, every one in a container of the official image for that
+version (19beta2 is a local build).
+
+| 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 |
+|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|
+| ✗  | ✓  | ✓  | ✓  | ✓  | ✓  | ✓  | ✓  | ✓  | ✓  |
+
+PostgreSQL 10 is not supported, and will not be: two triggers are created with
+`EXECUTE FUNCTION`, which PostgreSQL 10 does not accept.  The older
+`EXECUTE PROCEDURE` spelling would work everywhere, but it has been deprecated
+since 11, and 10 has been out of support since 2022.
+
 ## Install
 
 ```
