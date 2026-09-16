@@ -279,6 +279,15 @@ Pure SQL: no shared library, no dependencies. The database that most needs its
 guarantees audited is usually the one where getting a C extension approved is
 hardest.
 
+**Distribution 0.4.2 provides extension 0.4.1, and the mismatch is deliberate.**
+The release exists for the guard above: nothing under `pg_living_assertions--*.sql`
+changed, so there is no new extension version and no upgrade script to run -- an
+existing installation needs no `ALTER EXTENSION`. Minting a 0.4.2 of the
+extension with an empty upgrade would be a version number that means nothing,
+which is the exact failure this extension exists to close. Said here because the
+META of this distribution has declared the wrong version three times already,
+and the next reader should be able to tell a decision from a slip.
+
 ## License
 
 PostgreSQL License.
