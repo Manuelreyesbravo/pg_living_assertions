@@ -153,13 +153,34 @@ whose last word was `broken` is the case worth seeing, and it is labelled
 The check log is append-only for the same reason. If it could be edited, the
 declaration date would protect nothing.
 
-## The stored SQL cannot write
+## The stored SQL runs sealed
 
 This is the only place the extension runs text somebody stored earlier, so the
-evaluator is declared `STABLE` and **PostgreSQL itself refuses** any write
-inside it. Not a comment asking nicely: the check that tries to `INSERT` comes
-back `erroring` with zero rows written, and the regression test asserts both
-halves.
+check runs **read-only, inside a subtransaction that is always rolled back** once
+it has answered. The answer is kept; everything the check did is thrown away.
+
+- A write -- direct, or through any function the check calls -- and a
+  `nextval()` on an ordinary sequence are **refused by the engine**, and the
+  assertion comes back `erroring`: *the check tried to write, and a check may
+  only read*.
+- What read-only lets through -- a session setting changed with `set_config()`,
+  a row in a temporary table -- is **undone by the rollback**, so the caller's
+  session and data are exactly as they were.
+- The caller is not sealed: it keeps writing afterwards, and the check still
+  sees rows the caller wrote earlier in the same transaction (which is what a
+  gate evaluating assertions inside a commit needs).
+
+**Up to 0.4.x this section said the stored SQL "cannot write", and that was
+false.** The evaluator was `STABLE`, and PostgreSQL enforces that only for the
+statements written directly in the check. A check that called a volatile
+function wrote its row and reported `holds`; so did one that advanced a
+sequence or changed the caller's `work_mem`. The regression test only ever
+tried a direct `INSERT` -- the one case `STABLE` does catch. `test/sql/read_only.sql`
+now tries all of them, and it failed on 0.4.1 before 0.5.0 was written. Measured
+cost of the seal: none distinguishable, about 24 µs per `run()` either way.
+
+What it still does **not** stop is listed under *What it does not do*, and each
+item is pinned by the same test, so the list is a tested fact rather than a hope.
 
 A check that returns more than one row is also `erroring`, not answered with the
 first one. `EXECUTE ... INTO` keeps the first row without complaining, which
@@ -238,12 +259,25 @@ protection.
   its assertions turn `erroring` rather than vanishing. That is the right
   direction -- loud beats silent -- but it means orphans need retiring by hand.
 - **`unknown` is not a diagnosis.** It says the check could not decide, not why.
+- **The seal has three known gaps**, all things a rollback cannot undo and
+  read-only does not refuse: a `nextval()` on a **temporary** sequence, a
+  **session-level** advisory lock, and anything that leaves the transaction --
+  `dblink`, a foreign data wrapper, a function in an untrusted language that
+  writes a file. The first two are pinned by `test/sql/read_only.sql`. This is
+  why declaring an assertion is a privilege (below): the seal limits what a
+  trusted author can break by mistake, it does not make an untrusted one safe.
 
 ## Tested on
 
 Measured on 2026-09-16, not assumed: `make installcheck` was run against each
 of these releases, every one in a container of the official image for that
 version (19beta2 is a local build).
+
+**That table measured 0.4.1.** 0.5.0 has been run on 19beta2 only, so far. The
+seal uses nothing newer than subtransactions in PL/pgSQL and `set_config()` on
+`transaction_read_only`, both far older than 11 -- which is an argument, and
+this section exists to hold measurements, not arguments. The table is re-run
+before 0.5.0 is called tested anywhere else.
 
 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 |
 |:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|
@@ -264,6 +298,15 @@ make check-dump     # does the registry survive pg_dump + restore?
 make check-privs    # who may store SQL that somebody else will execute
 make cluster-stop
 ```
+
+**Until 0.5.0 the throwaway cluster tested the installed copy, not this repo.**
+PostgreSQL looks for control files in the `extension/` subdirectory of each
+`extension_control_path` element; the cluster pointed at the repo root, which has
+none, so every suite silently ran against whatever version was last
+`make install`ed. It was found when the 0.5.0 test kept reporting 0.4.1's
+behaviour. `test/cluster.sh start` now links the repo's files into a directory of
+the right shape, and **refuses to start the suites if the server sees a
+different version than this repo declares**.
 
 **`check-dump` and `check-privs` create and drop roles and databases**, so they
 run against the throwaway cluster of `test/cluster.sh` and not against whatever
@@ -294,14 +337,9 @@ Pure SQL: no shared library, no dependencies. The database that most needs its
 guarantees audited is usually the one where getting a C extension approved is
 hardest.
 
-**Distribution 0.4.2 provides extension 0.4.1, and the mismatch is deliberate.**
-The release exists for the guard above: nothing under `pg_living_assertions--*.sql`
-changed, so there is no new extension version and no upgrade script to run -- an
-existing installation needs no `ALTER EXTENSION`. Minting a 0.4.2 of the
-extension with an empty upgrade would be a version number that means nothing,
-which is the exact failure this extension exists to close. Said here because the
-META of this distribution has declared the wrong version three times already,
-and the next reader should be able to tell a decision from a slip.
+Distribution 0.5.0 provides extension 0.5.0. An existing 0.4.1 installation
+moves with `ALTER EXTENSION pg_living_assertions UPDATE TO '0.5.0'`, which only
+replaces the evaluator: no table changes, and every recorded verdict stays.
 
 ## License
 
