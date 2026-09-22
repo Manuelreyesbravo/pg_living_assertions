@@ -273,6 +273,10 @@ Measured on 2026-09-16, not assumed: `make installcheck` was run against each
 of these releases, every one in a container of the official image for that
 version (19beta2 is a local build).
 
+`test/matriz.sh` re-runs the whole table in containers of the official images, and **PG 10 is
+its control**: 10 must fail, because the triggers use `EXECUTE FUNCTION`. A run where 10 passes
+is reported as not measuring what it claims to.
+
 **That table measured 0.4.1.** 0.5.0 has been run on 19beta2 only, so far. The
 seal uses nothing newer than subtransactions in PL/pgSQL and `set_config()` on
 `transaction_read_only`, both far older than 11 -- which is an argument, and
