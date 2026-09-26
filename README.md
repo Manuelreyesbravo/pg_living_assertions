@@ -277,11 +277,10 @@ version (19beta2 is a local build).
 its control**: 10 must fail, because the triggers use `EXECUTE FUNCTION`. A run where 10 passes
 is reported as not measuring what it claims to.
 
-**That table measured 0.4.1.** 0.5.0 has been run on 19beta2 only, so far. The
-seal uses nothing newer than subtransactions in PL/pgSQL and `set_config()` on
-`transaction_read_only`, both far older than 11 -- which is an argument, and
-this section exists to hold measurements, not arguments. The table is re-run
-before 0.5.0 is called tested anywhere else.
+**That table measured 0.4.1.** 0.5.0 was measured on 2026-09-26 by the CI in
+`.github/workflows`, which runs `installcheck` (`basic` and `read_only`, the
+test that pins the seal) and an upgrade check on 11 to 19: all pass. The CI
+does not run 10, so the ✗ there is still the 0.4.1 measurement.
 
 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 |
 |:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|
@@ -344,6 +343,19 @@ hardest.
 Distribution 0.5.0 provides extension 0.5.0. An existing 0.4.1 installation
 moves with `ALTER EXTENSION pg_living_assertions UPDATE TO '0.5.0'`, which only
 replaces the evaluator: no table changes, and every recorded verdict stays.
+
+## Related work
+
+[pg_isok](https://pgxn.org/dist/pg_isok/), by Karl O. Pinc, also runs SQL
+somebody stored earlier and reports what it finds; the author of this
+extension co-maintains it. The two answer different questions. pg_isok works
+row by row: each query returns the rows that look questionable, a person
+reviews them and defers the acceptable ones, possibly forever, and the next
+report shows only what is new. It is built for data cleanup and for business
+rules that are fuzzy. This extension works claim by claim: each check returns
+one verdict, and what it keeps is that verdict and when it was last reached.
+When the answer is a list of rows a person has to look at, use pg_isok; when
+it is whether a guarantee still holds, use this.
 
 ## License
 
