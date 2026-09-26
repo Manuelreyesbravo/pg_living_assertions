@@ -340,9 +340,17 @@ Pure SQL: no shared library, no dependencies. The database that most needs its
 guarantees audited is usually the one where getting a C extension approved is
 hardest.
 
-Distribution 0.5.0 provides extension 0.5.0. An existing 0.4.1 installation
-moves with `ALTER EXTENSION pg_living_assertions UPDATE TO '0.5.0'`, which only
-replaces the evaluator: no table changes, and every recorded verdict stays.
+Distribution 0.5.1 provides extension 0.5.1. An existing installation moves
+with `ALTER EXTENSION pg_living_assertions UPDATE TO '0.5.1'`: from 0.4.1 it
+replaces the evaluator (0.5.0) and `run()` (0.5.1), with no table changes, and
+every recorded verdict stays.
+
+**0.5.1 fixes a `run()` that could fail with `type "checks" does not exist`.**
+It switches to the assertion's recorded `search_path` and its row variables
+were declared with unqualified types; after the type cache entry of `checks`
+is invalidated in the same session (an `ANALYZE`, which autovacuum runs on its
+own), PL/pgSQL looks the type up again under that path. Present since 0.4.0,
+seen in use in 35 of about 7,300 runs, and pinned by `test/sql/recorded_path.sql`.
 
 ## Related work
 

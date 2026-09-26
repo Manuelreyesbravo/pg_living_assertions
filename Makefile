@@ -7,13 +7,14 @@ DATA         = pg_living_assertions--0.1.0.sql \
                pg_living_assertions--0.2.0--0.3.0.sql \
                pg_living_assertions--0.3.0--0.4.0.sql \
                pg_living_assertions--0.4.0--0.4.1.sql \
-               pg_living_assertions--0.4.1--0.5.0.sql
+               pg_living_assertions--0.4.1--0.5.0.sql \
+               pg_living_assertions--0.5.0--0.5.1.sql
 PG_CONFIG   ?= pg_config
 
 # One installcheck, no dependencies -- the same lesson the rest of the family
 # took: an installcheck that fails because of something the user does not have
 # trains the user to ignore it.
-REGRESS      = basic read_only
+REGRESS      = basic read_only recorded_path
 REGRESS_OPTS = --inputdir=test --outputdir=test
 
 PGXS := $(shell $(PG_CONFIG) --pgxs)
