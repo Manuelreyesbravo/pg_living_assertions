@@ -44,4 +44,5 @@ $$;
 COMMENT ON FUNCTION declare_unchanged(text, text, text, text, text) IS
     'Approves what an expression evaluates to right now and registers it as a '
     'living assertion that re-evaluates and compares. Takes the EXPRESSION, not '
-    'the value: a stored value would be compared against itself forever.';
+    'the value: a stored value would be compared against itself forever, which '
+    'is a check that can never fail and therefore never protects anything.';
