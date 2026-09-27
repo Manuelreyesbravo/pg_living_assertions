@@ -1,5 +1,8 @@
 # pg_living_assertions
 
+[![CI](https://github.com/Manuelreyesbravo/pg_living_assertions/actions/workflows/ci.yml/badge.svg)](https://github.com/Manuelreyesbravo/pg_living_assertions/actions/workflows/ci.yml)
+[![Cache invalidation](https://github.com/Manuelreyesbravo/pg_living_assertions/actions/workflows/cache-invalidation.yml/badge.svg)](https://github.com/Manuelreyesbravo/pg_living_assertions/actions/workflows/cache-invalidation.yml)
+
 A registry of things you claim are true about your database, each with the SQL
 that proves it and the date it was last proven.
 
