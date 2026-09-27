@@ -1,0 +1,45 @@
+name: Cache invalidation
+
+# The regression suite, run on a PostgreSQL built with --enable-cassert and
+# debug_discard_caches=1: every cache lookup meets an invalidation, the way
+# PostgreSQL's own buildfarm hunts invalidation bugs.  This is what would have
+# caught the 0.5.0 bug (run() re-resolved its row types by name after a cache
+# flush) before release, and it guards every function against that class from
+# now on -- see test/sql/recorded_path.sql.
+#
+# Packaged PostgreSQL cannot set debug_discard_caches, so the server is built
+# from source (ci/build_cassert.sh).  That is slow, so this runs weekly and on
+# demand, not on every push -- the per-push matrix in ci.yml covers the rest.
+#
+# Two branches: the current stable, and master (PostgreSQL 20 in development),
+# so a change in PostgreSQL that breaks this extension shows up here in days.
+
+on:
+  schedule:
+    - cron: "17 6 * * 1"   # Mondays, 06:17 UTC
+  workflow_dispatch:
+  push:
+    paths:
+      - "ci/build_cassert.sh"
+      - "ci/discard_caches_check.sh"
+      - ".github/workflows/cache-invalidation.yml"
+
+jobs:
+  discard:
+    name: assert build, ${{ matrix.branch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        branch: [REL_18_STABLE, master]
+    steps:
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y build-essential bison flex
+      - name: Check out the extension
+        uses: actions/checkout@v4
+      - name: Check out PostgreSQL ${{ matrix.branch }}
+        run: git clone --depth 1 --branch ${{ matrix.branch }} https://git.postgresql.org/git/postgresql.git "$RUNNER_TEMP/pg-src"
+      - name: Build it with assertions
+        run: bash ci/build_cassert.sh "$RUNNER_TEMP/pg-src" "$RUNNER_TEMP/pgc"
+      - name: Regression suite with debug_discard_caches=1
+        run: PG_CONFIG="$RUNNER_TEMP/pgc/bin/pg_config" bash ci/discard_caches_check.sh
