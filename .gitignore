@@ -8,6 +8,9 @@ test/regression.out
 *.o
 *.so
 
+# PGXN release bundles built by pgxn-bundle; never source.
+*.zip
+
 # The throwaway cluster test/cluster.sh builds, and the uv cache the harness
 # needs inside the project because the tree's jail does not reach ~/.cache.
 .testcluster
