@@ -370,4 +370,6 @@ it is whether a guarantee still holds, use this.
 
 ## License
 
-PostgreSQL License.
+PostgreSQL License -- see [LICENSE](LICENSE). Copyright 2026 Manuel Reyes Bravo.
+
+The name is not licensed with the code: see [TRADEMARK.md](TRADEMARK.md).
