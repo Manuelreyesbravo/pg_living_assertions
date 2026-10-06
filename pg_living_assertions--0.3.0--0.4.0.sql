@@ -1,3 +1,6 @@
+-- Copyright 2026 Manuel Reyes Bravo
+-- SPDX-License-Identifier: PostgreSQL
+
 -- pg_living_assertions 0.3.0 -> 0.4.0
 --
 -- Records the search_path a check runs under, captured when it was declared.

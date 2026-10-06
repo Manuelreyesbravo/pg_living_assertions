@@ -1,3 +1,6 @@
+-- Copyright 2026 Manuel Reyes Bravo
+-- SPDX-License-Identifier: PostgreSQL
+
 -- pg_living_assertions 0.4.1 -> 0.5.0
 --
 -- THE STORED SQL COULD WRITE, and the README said it could not.

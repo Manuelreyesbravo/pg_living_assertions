@@ -1,3 +1,6 @@
+-- Copyright 2026 Manuel Reyes Bravo
+-- SPDX-License-Identifier: PostgreSQL
+
 -- pg_living_assertions 0.1.0
 --
 -- A registry of things you believe are true about your database, each with the

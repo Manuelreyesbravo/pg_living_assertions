@@ -1,3 +1,6 @@
+-- Copyright 2026 Manuel Reyes Bravo
+-- SPDX-License-Identifier: PostgreSQL
+
 -- pg_living_assertions 0.4.0 -> 0.4.1
 --
 -- THE REGISTRY DID NOT WORK AFTER A RESTORE, and the dump test said it survived.

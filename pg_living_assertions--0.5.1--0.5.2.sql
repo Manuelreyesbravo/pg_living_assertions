@@ -1,3 +1,6 @@
+-- Copyright 2026 Manuel Reyes Bravo
+-- SPDX-License-Identifier: PostgreSQL
+
 -- pg_living_assertions 0.5.1 -> 0.5.2
 --
 -- No schema change. This release adds project governance and legal files

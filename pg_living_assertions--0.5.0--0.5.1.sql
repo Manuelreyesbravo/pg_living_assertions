@@ -1,3 +1,6 @@
+-- Copyright 2026 Manuel Reyes Bravo
+-- SPDX-License-Identifier: PostgreSQL
+
 -- pg_living_assertions 0.5.0 -> 0.5.1
 --
 -- run() COULD FAIL WITH 'type "checks" does not exist', and did, in use: 35 of

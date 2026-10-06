@@ -1,3 +1,6 @@
+-- Copyright 2026 Manuel Reyes Bravo
+-- SPDX-License-Identifier: PostgreSQL
+
 -- pg_living_assertions 0.1.0 -> 0.2.0
 --
 -- Adds declare_unchanged(): the shape every guard was writing by hand.

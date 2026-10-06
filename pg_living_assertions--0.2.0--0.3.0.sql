@@ -1,3 +1,6 @@
+-- Copyright 2026 Manuel Reyes Bravo
+-- SPDX-License-Identifier: PostgreSQL
+
 -- pg_living_assertions 0.2.0 -> 0.3.0
 --
 -- Writes down the trust model and adds a second gate in front of it.
