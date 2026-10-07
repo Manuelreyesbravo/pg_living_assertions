@@ -6,7 +6,7 @@
    "maintainer": [
       "Manuel Reyes <manuelreyesbravo@gmail.com>"
    ],
-   "license": "postgresql",
+   "license": "apache_2_0",
    "provides": {
       "pg_living_assertions": {
          "abstract": "Register what you believe is true, with the SQL that proves it and the date it was last proven",
