@@ -245,10 +245,13 @@ the trusted role stores a check, the owner's cron runs it, and it reads what the
 owner can read. Shown rather than described, so nobody grants it believing they
 are granting less.
 
-One thing that is **not** a boundary: the evaluator runs with a fixed
-`search_path`, so an unqualified name will not resolve. That limits accidental
-damage. Qualifying a name costs eight characters, so do not mistake it for
-protection.
+One thing that is **not** a boundary: the `search_path`. A check runs under the
+path recorded when it was declared (since 0.4.0), so an unqualified name resolves
+the way it did for whoever declared it -- convenient, and no protection: anyone
+who can create objects in a schema on that path can shadow a name. What the
+evaluator does pin, since 0.5.5, is `pg_temp`: it always goes LAST, so a
+temporary table of the session that evaluates can never stand in for the table
+a check names (`make check-pgtemp`). Qualify the names a check depends on.
 
 ## What it does not do
 
@@ -354,6 +357,15 @@ were declared with unqualified types; after the type cache entry of `checks`
 is invalidated in the same session (an `ANALYZE`, which autovacuum runs on its
 own), PL/pgSQL looks the type up again under that path. Present since 0.4.0,
 seen in use in 35 of about 7,300 runs, and pinned by `test/sql/recorded_path.sql`.
+
+**0.5.5 fixes a temporary table changing what an assertion reads.** PostgreSQL
+searches `pg_temp` first for tables when `search_path` does not name it, and no
+path here named it: a check's `from cuentas` read the evaluating session's
+`pg_temp.cuentas`, and a temporary `assertions` with a forged row made `run()`
+answer `holds` for a failing assertion. It matters when the check runs in someone
+else's session with the owner's rights -- a `SECURITY DEFINER` caller such as
+pg_agent_gate. Measured on 0.5.4 and pinned by `test/pg_temp.sh`. Every
+function now names `pg_temp` last; no table changes, every recorded verdict stays.
 
 ## Related work
 

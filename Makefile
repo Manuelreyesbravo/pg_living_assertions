@@ -11,7 +11,8 @@ DATA         = pg_living_assertions--0.1.0.sql \
                pg_living_assertions--0.5.0--0.5.1.sql \
                pg_living_assertions--0.5.1--0.5.2.sql \
                pg_living_assertions--0.5.2--0.5.3.sql \
-               pg_living_assertions--0.5.3--0.5.4.sql
+               pg_living_assertions--0.5.3--0.5.4.sql \
+               pg_living_assertions--0.5.4--0.5.5.sql
 PG_CONFIG   ?= pg_config
 
 # One installcheck, no dependencies -- the same lesson the rest of the family
@@ -45,6 +46,13 @@ cluster-stop:
 .PHONY: check-privs
 check-privs:
 	@PSQL=$(shell $(PG_CONFIG) --bindir)/psql bash ./test/privilegios.sh
+
+# Can a temporary table of the session that evaluates change what an assertion
+# reads? It could, through pg_temp, until 0.5.5. Like check-privs, it needs a
+# second role, so it lives outside installcheck.
+.PHONY: check-pgtemp
+check-pgtemp:
+	@PSQL=$(shell $(PG_CONFIG) --bindir)/psql bash ./test/pg_temp.sh
 
 .PHONY: check-dump
 check-dump:
