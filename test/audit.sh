@@ -15,6 +15,10 @@
 #   F5  a NULL reason passed the CHECKs that make retiring and replacing cost one.
 #   F7  an unusable recorded path made run_all() raise for everyone instead of
 #       recording that one assertion as erroring.
+#   F9  the seal stops writes to the database, not what is not one: a check ran COPY ... TO
+#       PROGRAM as whoever ran it, and could leave a session advisory lock behind.
+#   F6  a check that cancelled its own backend aborted run_all() for every assertion.
+#       From 0.5.8 a check runs as the role that declared it.
 #   F15 a schema name with a comma in it was split by the 0.5.5 path rewrite; and an
 #       unquoted PG_TEMP was not recognised as pg_temp. SET stores the path lower-cased,
 #       so a path set with SET cannot show it; set_config() stores it as written.
@@ -174,6 +178,28 @@ check "control: the path was recorded as written" "PG_TEMP, public" \
     "$(as_owner -c "select search_path from living_assertions.assertions where name = 'upper_pg_temp'")"
 check "an unquoted PG_TEMP first in the path does not let a temporary table answer" "broken" \
     "$(as_owner -c "create temp table accounts (balance int)" -c "insert into accounts values (1)" -c "select (living_assertions.run('upper_pg_temp')).state" | tail -1)"
+
+echo "F9/F6: a check runs as the role that declared it"
+PWN="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/.testcluster/la_pwn"
+rm -f "$PWN"
+as_role "$AUTHOR" -q -c "create function evil.cp() returns int language plpgsql volatile as \$\$ begin copy (select 1) to program 'touch $PWN'; return 1; end \$\$" >/dev/null
+check "control: as the superuser, that function runs a program" "ran=t" \
+    "$(as_owner -c "select evil.cp()" >/dev/null; [ -f "$PWN" ] && echo ran=t || echo ran=f)"
+rm -f "$PWN"
+as_role "$AUTHOR" -q -c "select living_assertions.declare('f9_copy', 'a check that runs a program', 'select evil.cp() = 1 as holds', p_check_now => false)" \
+     -c "select living_assertions.declare('f9_lock', 'a check that takes a session lock', 'select pg_advisory_lock(424243) is not null as holds', p_check_now => false)" \
+     -c "select living_assertions.declare('f6_cancel', 'a check that cancels its own backend', 'select pg_cancel_backend(pg_backend_pid()) and pg_sleep(1) is not null as holds', p_check_now => false)" >/dev/null
+check "run() by the superuser of the author's check runs no program" "ran=f" \
+    "$(as_owner -c "select (living_assertions.run('f9_copy')).state" >/dev/null; [ -f "$PWN" ] && echo ran=t || echo ran=f)"
+check "  ...and the assertion is erroring" "erroring" "$(as_owner -c "select living_assertions.state('f9_copy')")"
+check "run() leaves no advisory lock behind in the runner's session" "locks=0" \
+    "$(as_owner -c "select (living_assertions.run('f9_lock')).state" -c "select 'locks=' || count(*) from pg_locks where locktype = 'advisory' and pid = pg_backend_pid()" | tail -1)"
+check "a check that cancels its backend does not abort run_all()" "recorded_all=true" \
+    "$(as_owner -c "select 'recorded_all=' || (count(*) = (select count(*) from living_assertions.assertions where retired_at is null)) from living_assertions.run_all()" 2>&1)"
+check "a role with INSERT on assertions cannot sign one as the superuser" "cannot act as" \
+    "$(as_role "$AUTHOR" -c "insert into living_assertions.assertions (name, claim, check_sql, declared_by) select 'f9_forged', 'signed as someone else', 'select true as holds', rolname from pg_roles where rolsuper limit 1")"
+check "a SECURITY DEFINER caller cannot run another role's check as itself" "security-definer" \
+    "$(as_owner -c "create or replace function public.vouch(p text) returns text language sql security definer set search_path = pg_catalog as \$\$ select (living_assertions.run(p)).detail \$\$" -c "select public.vouch('f9_lock')" | tail -1)"
 
 echo "upgrade: an installation of 0.5.5 holding rows the new constraints refuse"
 UPGRADE_DB=living_assertions_test_audit_upgrade

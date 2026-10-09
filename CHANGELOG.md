@@ -5,6 +5,27 @@ Each upgrade script (`pg_living_assertions--OLD--NEW.sql`) documents, in its own
 header, exactly what changed and why; that is the authoritative per-version
 record.
 
+## 0.5.8 -- 2026-10-09
+
+* **A check runs as the role that declared it** (external audit: F9, F6; the same class
+  as pg_plan_guard's PG-S1). Up to 0.5.7 it ran with the privileges of whoever called
+  `run()` -- documented, and demonstrated by `test/privilegios.sh` reading the owner's
+  secret through a trusted role's check. The seal bounded writes to the database and
+  nothing else: `COPY ... TO PROGRAM` is a read, so a check ran a program as the caller;
+  a session advisory lock stayed in the caller's session; and a check that cancelled its
+  own backend aborted `run_all()` for every assertion. Inside the seal the evaluator now
+  does `SET ROLE` to `declared_by` (not when that is the current user), so a check can do
+  what its author could and no more; what needs more is that assertion's `erroring`, and
+  cancelling the caller's backend is refused the same way. Advisory locks taken in the
+  seal are released (`test/sql/read_only.sql` measured the lock held until 0.5.7).
+* **`declared_by` cannot be forged at insert:** a trigger accepts a name other than the
+  declaring role only from a role that may `SET ROLE` to it (a superuser restoring a dump).
+* **Behaviour change for callers.** A caller must be able to `SET ROLE` to each author; a
+  superuser can. A `SECURITY DEFINER` caller -- pg_agent_gate binding an assertion -- runs
+  the checks its owner declared; the others are `erroring`, with the reason.
+* `test/audit.sh`: the F9/F6 teeth, and `test/privilegios.sh` inverted -- red on 0.5.7
+  with their controls green.
+
 ## 0.5.7 -- 2026-10-08
 
 * **Metadata only.** The PGXN description is two sentences now; the longer

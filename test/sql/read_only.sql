@@ -79,11 +79,12 @@ SELECT state('advances_a_temp_sequence') AS known_limit_holds;
 -- so last_value alone would read the same whether the check moved it or not.
 SELECT is_called AS known_limit_temp_sequence_moved FROM pg_temp.temp_counter;
 
--- A session-level advisory lock is not released by a rollback.
+-- A session-level advisory lock is not released by a rollback; until 0.5.7 it stayed held
+-- in the caller's session. From 0.5.8 the seal releases what it took.
 SELECT declare('takes_a_session_lock', 'takes a session-level advisory lock',
                'select pg_advisory_lock(4242) is not null as holds') > 0 AS declared;
 SELECT state('takes_a_session_lock') AS known_limit_holds;
-SELECT count(*) AS known_limit_lock_still_held FROM pg_locks
+SELECT count(*) AS session_lock_still_held FROM pg_locks
  WHERE locktype = 'advisory' AND objid = 4242 AND pid = pg_backend_pid();
 SELECT pg_advisory_unlock_all();
 

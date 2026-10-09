@@ -220,17 +220,28 @@ in a runbook, or in a monitor that only knows OK and CRITICAL.
 
 ## Who may store SQL that someone else will run
 
-This registry stores SQL and later runs it **as whoever calls `run()`**. Nothing
-here is `SECURITY DEFINER`, so a check runs with the caller's privileges -- and
-the caller is usually a cron job owned by someone with more rights than whoever
-wrote the check.
+This registry stores SQL and later runs it when somebody else calls `run()` --
+usually a cron job owned by someone with more rights than whoever wrote the
+check. **Since 0.5.8 a check runs as the role that declared it.** Inside the
+sealed subtransaction, after read-only and the recorded path, the evaluator does
+`SET ROLE` to `declared_by` (not when that is already the current user, the
+common case), so a stored check can read and do exactly what its author could,
+and no more. Whatever needs more is that assertion's `erroring`. A session
+advisory lock taken by a check is released when the seal ends.
 
-> **Whoever can `INSERT` into `assertions` can run arbitrary SQL as every future
-> caller of `run_all()`.** Grant it the way you grant `cron.schedule`.
+Until 0.5.7 a check ran with the caller's privileges, and this section said so:
+whoever could `INSERT` into `assertions` could run SQL as every future caller of
+`run_all()`. The seal bounded writes to the database and nothing else, and an
+external audit measured the rest: `COPY ... TO PROGRAM` is a read, so a check ran
+a program as the caller.
 
-That is not a bug, it is the shape of the feature. It is stated here because a
-registry of stored SQL that does not say it out loud is a footgun with good
-manners.
+What it asks of the caller: it must be able to `SET ROLE` to each author. A
+superuser can; another role needs membership. PostgreSQL forbids `SET ROLE`
+inside a `SECURITY DEFINER` function, so such a caller -- pg_agent_gate binding
+an assertion, for one -- runs the checks its owner declared, and the others are
+`erroring` with that reason rather than running as the owner. `declared_by`
+defaults to whoever declares, and a trigger accepts another name only from a
+role that may become it.
 
 **It is closed by default, and that is verified rather than assumed.** A role
 with `USAGE` on the schema still gets `permission denied for table assertions`,
@@ -240,10 +251,10 @@ that changes nothing today and matters the day somebody grants table privileges
 without thinking about what that implies.
 
 `make check-privs` proves both directions: a stranger cannot declare or read,
-the role you deliberately granted can, **and the escalation is demonstrated** --
-the trusted role stores a check, the owner's cron runs it, and it reads what the
-owner can read. Shown rather than described, so nobody grants it believing they
-are granting less.
+and the role you deliberately granted can. It also shows the boundary: the
+trusted role stores a check that reads a secret only the owner may read, the
+owner's cron runs it, and since 0.5.8 it is `erroring` -- it ran as the trusted
+role -- where up to 0.5.7 it read the secret.
 
 One thing that is **not** a boundary: the `search_path`. A check runs under the
 path recorded when it was declared (since 0.4.0), so an unqualified name resolves

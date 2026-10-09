@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Who can store SQL that somebody else will execute?
 #
-# This registry stores SQL and later runs it AS WHOEVER CALLS run(). Nothing is
-# SECURITY DEFINER, so a check runs with the caller's privileges -- and the
-# caller is usually a cron job owned by someone with more rights than whoever
-# wrote the check. Whoever can INSERT into `assertions` can therefore run
-# arbitrary SQL as every future caller of run_all().
+# This registry stores SQL and later runs it when somebody else calls run() --
+# usually a cron job owned by someone with more rights than whoever wrote the
+# check. Up to 0.5.7 the check ran with that caller's privileges, so whoever
+# could INSERT into `assertions` could run SQL as every future caller of
+# run_all(). From 0.5.8 a check runs as the role that declared it.
 #
 # That has to be CLOSED BY DEFAULT and PROVEN closed in BOTH directions -- a
 # check saying "the attacker failed" proves nothing if the legitimate owner
@@ -124,9 +124,19 @@ PGUSER=$VIGILANTE $PSQL -d "$BASE" -q -c \
 comprobar "declarada por el vigilante todavia no lee nada" "erroring" \
     "$(PGUSER=$VIGILANTE $PSQL -d "$BASE" -tAc "select living_assertions.state('la_frontera')" 2>&1 || true)"
 
+# Hasta 0.5.7 el segundo paso era el ataque: el cron del dueno corria el SQL del vigilante con
+# sus propios privilegios y leia el secreto. Desde 0.5.8 un chequeo corre como el rol que lo
+# declaro, asi que el cron del dueno ya no presta sus privilegios.
 $PSQL -d "$BASE" -q -c "select living_assertions.run('la_frontera')" >/dev/null 2>&1 || true
-salida=$($PSQL -d "$BASE" -tAc "select detail from living_assertions.status where name = 'la_frontera'" 2>&1 || true)
-comprobar "el SQL del rol de confianza corre con los privilegios del DUENO" "la-clave-del-banco" "$salida"
+salida=$($PSQL -d "$BASE" -tAc "select state || ' ' || detail from living_assertions.status where name = 'la_frontera'" 2>&1 || true)
+comprobar "corrida por el DUENO, sigue corriendo como el vigilante: erroring" "erroring" "$salida"
+if [[ "$salida" == *"la-clave-del-banco"* ]]; then
+    echo "  FAIL el SQL del rol de confianza NO lee lo que lee el dueno"
+    echo "       obtuvo: $salida"
+    fallos=$((fallos + 1))
+else
+    echo "  ok   el SQL del rol de confianza NO lee lo que lee el dueno"
+fi
 
 if [ "$fallos" -ne 0 ]; then
     echo "$fallos comprobacion(es) fallaron"
