@@ -5,7 +5,50 @@ Each upgrade script (`pg_living_assertions--OLD--NEW.sql`) documents, in its own
 header, exactly what changed and why; that is the authoritative per-version
 record.
 
-## 0.5.5 -- unreleased
+## 0.5.6 -- 2026-10-08
+
+From an external audit of 0.5.5, each finding measured on 0.5.5 before it was changed
+(`test/audit.sh`, `make check-audit`, in `make check-suites`: every tooth red on 0.5.5
+with its control green).
+
+* **The recorded `search_path` no longer stays in the caller's session (F1).** `run()`
+  applied it with `set_config(..., false)`, and the 0.5.5 comment said the function's
+  `SET` clause would restore it on exit. It does not: a plain `SET` inside a function
+  with a `SET` clause overrides the clause and persists after the function. After
+  `run_all()` a runner's next unqualified call reached a function in a schema the
+  author of an assertion wrote, and a `SECURITY DEFINER` wrapper with its own
+  `SET search_path` continued under the author's path once `run()` returned.
+* **`run()`'s bookkeeping no longer runs under the author's path (F2).** With a
+  recorded path of `evil, pg_catalog`, the author's `clock_timestamp()` ran as the
+  runner in a session that only called `run_all()`.
+* Both closed in one place: the path is applied inside `_evaluate`'s sealed
+  subtransaction with `set_config(..., true)`, right after read-only is switched on,
+  and the rollback that undoes the check undoes it too. `_evaluate` has its own
+  `SET search_path = pg_catalog, pg_temp` for everything outside the seal, and the
+  calls around the check are schema-qualified. `run()` no longer touches the path.
+* **An unparsable recorded path is that assertion `erroring`** instead of `run_all()`
+  raising for everyone (F7), and **the path is split the way PostgreSQL splits it**:
+  0.5.5 broke a quoted schema name containing a comma (F15), and did not recognise an
+  unquoted `PG_TEMP` as `pg_temp`. `SET` stores the path lower-cased, but a path set
+  with `set_config()` or `ALTER ROLE ... SET` is recorded as written, and with
+  `PG_TEMP` first a temporary table of the evaluating session answered for the check.
+* **A forged verdict cannot be pinned (F3).** The latest verdict was the one with the
+  latest `checked_at`, and a role allowed to run checks needs `INSERT` on `checks`: a
+  row dated `'infinity'` outranked every honest check forever. The latest verdict is
+  now the last row written (by `id`), and `checked_at` must be finite. Such a role can
+  still write a row; it lasts until the next honest check (README).
+* **An assertion is not edited in place, all of it (F4).** The trigger compared five
+  columns; `search_path`, `declared_by`, `why_changed` and `id` are fixed now, and a
+  retirement is written once -- not undone, not re-dated, its reason not rewritten.
+* **A `NULL` reason no longer passes** the checks that make retiring and replacing
+  cost one (F5).
+* **Two concurrent replacements of one assertion** no longer both retire it, the
+  second reason overwriting the first (F11): the predecessor is locked.
+* The upgrade adds the new constraints `NOT VALID` and validates them; an installation
+  already holding rows they refuse upgrades, gets a `WARNING` naming them, and keeps
+  them, since the record is append-only.
+
+## 0.5.5 -- 2026-10-08
 
 * **A temporary table of the session that evaluates an assertion can no longer
   change what it reads.** PostgreSQL searches `pg_temp` first for tables whenever

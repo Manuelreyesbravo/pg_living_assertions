@@ -1,0 +1,202 @@
+#!/usr/bin/env bash
+# The findings of the external audit of 0.5.5 that this repo closed, each against
+# its control -- the proof that the instrument can answer the other way.
+#
+#   F1  run() left the assertion's recorded search_path in the caller's session:
+#       set_config(..., false) inside a function with a SET clause is a plain SET,
+#       and a plain SET outlives the function. A runner's next unqualified name
+#       then resolved through a schema the author wrote.
+#   F2  run() did its own bookkeeping (clock_timestamp(), round(), ...) under that
+#       path, outside the seal: an author's clock_timestamp() ran as the runner.
+#   F3  a row in checks with checked_at = 'infinity' pinned a forged verdict above
+#       every honest one, forever.
+#   F4  the immutability trigger left search_path, declared_by, why_changed and a
+#       retirement editable in place.
+#   F5  a NULL reason passed the CHECKs that make retiring and replacing cost one.
+#   F7  an unusable recorded path made run_all() raise for everyone instead of
+#       recording that one assertion as erroring.
+#   F15 a schema name with a comma in it was split by the 0.5.5 path rewrite; and an
+#       unquoted PG_TEMP was not recognised as pg_temp. SET stores the path lower-cased,
+#       so a path set with SET cannot show it; set_config() stores it as written.
+#
+# Creates and drops roles and a database: runs against the throwaway cluster of
+# test/cluster.sh, like test/privilegios.sh.
+
+set -euo pipefail
+
+source "$(dirname "${BASH_SOURCE[0]}")/guardia.sh"
+
+DB=living_assertions_test_audit
+AUTHOR=living_assertions_test_audit_author
+WRITER=living_assertions_test_audit_writer
+EDITOR=living_assertions_test_audit_editor
+failures=0
+
+trap soltar_lo_reclamado EXIT
+exige_cluster
+reclamar_base "$DB"
+reclamar_rol "$AUTHOR"
+reclamar_rol "$WRITER"
+reclamar_rol "$EDITOR"
+
+check() {
+    local what="$1" expected="$2" got="$3"
+    if [[ "$got" == *"$expected"* ]]; then
+        echo "  ok   $what"
+    else
+        echo "  FAIL $what"
+        echo "       expected: $expected"
+        echo "       got:      $got"
+        failures=$((failures + 1))
+    fi
+}
+
+as_owner()  { $PSQL -X -d "$DB" -tA "$@" 2>&1 || true; }
+as_role()   { local r=$1; shift; PGUSER=$r $PSQL -X -d "$DB" -tA "$@" 2>&1 || true; }
+
+$PSQL -X -d "$DB" -q -v ON_ERROR_STOP=1 -v author="$AUTHOR" -v writer="$WRITER" -v editor="$EDITOR" <<'SQL'
+CREATE EXTENSION pg_living_assertions;
+
+-- What a runner reads, and what an author may write.
+CREATE TABLE accounts (balance int);
+INSERT INTO accounts VALUES (100), (-50);
+CREATE SCHEMA evil AUTHORIZATION :"author";
+CREATE TABLE evil.pwned (who text);
+ALTER TABLE evil.pwned OWNER TO :"author";
+
+GRANT USAGE ON SCHEMA living_assertions TO :"author", :"writer", :"editor";
+GRANT EXECUTE ON FUNCTION living_assertions.declare(text, text, text, text, text, boolean) TO :"author";
+GRANT SELECT, INSERT ON living_assertions.assertions TO :"author";
+GRANT SELECT ON living_assertions.assertions TO :"writer";
+GRANT INSERT ON living_assertions.checks TO :"writer";
+GRANT SELECT, UPDATE ON living_assertions.assertions TO :"editor";
+GRANT EXECUTE ON FUNCTION living_assertions.retire(text, text) TO :"editor";
+
+-- Broken for real, and declared with the ordinary path.
+SELECT living_assertions.declare('no_negative_balance', 'no balance is negative',
+       'select bool_and(balance >= 0) as holds from public.accounts', p_check_now => false);
+SELECT living_assertions.declare('retire_me', 'an assertion to retire later',
+       'select true as holds', p_check_now => false);
+SELECT living_assertions.declare('retired_already', 'an assertion retired with a reason',
+       'select true as holds', p_check_now => false);
+SELECT living_assertions.retire('retired_already', 'retired by the test setup');
+SQL
+
+
+# The author's side, in its own session: a function a runner would call
+# unqualified, a clock_timestamp() of its own, and two assertions that carry
+# those paths. Both checks are honest one-liners: everything hostile is in the path.
+as_role "$AUTHOR" -q -v ON_ERROR_STOP=1 <<'SQL' >/dev/null
+CREATE FUNCTION evil.refresh() RETURNS text LANGUAGE sql AS $$ SELECT 'author code ran' $$;
+CREATE FUNCTION evil.clock_timestamp() RETURNS timestamptz LANGUAGE plpgsql VOLATILE AS $$
+BEGIN
+    INSERT INTO evil.pwned VALUES (current_user);
+    RETURN pg_catalog.clock_timestamp();
+END $$;
+SET search_path = evil, public;
+SELECT living_assertions.declare('zzzz_sorts_last', 'its path is the last one run_all applies',
+       'select true as holds', p_check_now => false);
+SET search_path = evil, pg_catalog;
+SELECT living_assertions.declare('zzzz_path_before_catalog', 'evil is searched before pg_catalog',
+       'select true as holds', p_check_now => false);
+SQL
+
+echo "F1: the recorded path does not outlive run()"
+before=$(as_owner -c "show search_path")
+check "control: the author's assertion runs and holds" "holds" \
+    "$(as_owner -c "select (living_assertions.run('zzzz_sorts_last')).state")"
+check "the session's search_path after run_all() is the one it had before" "$before|$before" \
+    "$(as_owner -c "show search_path" -c "select count(*) > 0 from living_assertions.run_all()" -c "show search_path" | sed -n '1p;3p' | paste -sd'|')"
+check "an unqualified call after run_all() does not reach the author's schema" "does not exist" \
+    "$(as_owner -c "select count(*) from living_assertions.run_all()" -c "select refresh()")"
+check "inside BEGIN ... COMMIT too" "$before|$before" \
+    "$(as_owner -c "begin" -c "show search_path" -c "select (living_assertions.run('zzzz_sorts_last')).state" -c "show search_path" -c "commit" | grep -v '^BEGIN$\|^COMMIT$\|^holds$' | paste -sd'|')"
+check "a SECURITY DEFINER wrapper with its own path keeps it after run()" "public, pg_temp|public, pg_temp" \
+    "$(as_owner -c "create or replace function public.wrapper() returns text language plpgsql security definer set search_path = public, pg_temp as \$\$ declare p1 text; p2 text; begin p1 := current_setting('search_path'); perform living_assertions.run('zzzz_sorts_last'); p2 := current_setting('search_path'); return p1 || '|' || p2; end \$\$" -c "select public.wrapper()" | tail -1)"
+
+echo "F2: the bookkeeping of run() does not run the author's functions"
+as_owner -c "truncate evil.pwned" >/dev/null
+check "control: under that path, an unqualified clock_timestamp() is the author's" "pwned=1" \
+    "$(as_owner -c "set search_path = evil, pg_catalog" -c "select clock_timestamp() is not null" -c "select 'pwned=' || count(*) from evil.pwned" | tail -1)"
+as_owner -c "truncate evil.pwned" >/dev/null
+check "a fresh session that only calls run_all() runs none of it" "pwned=0" \
+    "$(as_owner -c "select count(*) > 0 from living_assertions.run_all()" -c "select 'pwned=' || count(*) from evil.pwned" | tail -1)"
+check "  ...and the assertion with that path still holds" "holds" \
+    "$(as_owner -c "select living_assertions.state('zzzz_path_before_catalog')")"
+
+echo "F3: a forged row cannot pin a verdict"
+check "control: the assertion is broken" "broken" \
+    "$(as_owner -c "select (living_assertions.run('no_negative_balance')).state")"
+check "checked_at = 'infinity' is refused" "violates check constraint" \
+    "$(as_role "$WRITER" -c "insert into living_assertions.checks (assertion, state, detail, checked_at) select id, 'holds', 'forged', 'infinity' from living_assertions.assertions where name = 'no_negative_balance'" 2>&1)"
+check "control: a role with INSERT on checks can still write a row" "INSERT 0 1" \
+    "$(as_role "$WRITER" -c "insert into living_assertions.checks (assertion, state, detail, checked_at) select id, 'holds', 'forged', '2999-01-01' from living_assertions.assertions where name = 'no_negative_balance'")"
+check "  ...and before the next honest check, it is what state() answers" "holds" \
+    "$(as_owner -c "select living_assertions.state('no_negative_balance')")"
+as_owner -c "select living_assertions.run('no_negative_balance')" >/dev/null
+check "a forged row dated in the future does not outrank the next honest check" "broken" \
+    "$(as_owner -c "select living_assertions.state('no_negative_balance')")"
+check "  ...in status either" "broken" \
+    "$(as_owner -c "select state from living_assertions.status where name = 'no_negative_balance'")"
+
+echo "F4: an assertion is not edited in place"
+check "its search_path" "not edited in place" \
+    "$(as_role "$EDITOR" -c "update living_assertions.assertions set search_path = 'evil' where name = 'no_negative_balance'")"
+check "its declared_by" "not edited in place" \
+    "$(as_role "$EDITOR" -c "update living_assertions.assertions set declared_by = 'somebody_else' where name = 'no_negative_balance'")"
+check "a retirement is not undone" "ERROR" \
+    "$(as_role "$EDITOR" -c "update living_assertions.assertions set retired_at = null, retired_why = null where name = 'retired_already'")"
+check "a retirement's reason is not rewritten" "ERROR" \
+    "$(as_role "$EDITOR" -c "update living_assertions.assertions set retired_why = 'a different story entirely' where name = 'retired_already'")"
+
+echo "F5: retiring and replacing cost a reason, NULL included"
+check "retire() with a NULL reason is refused" "ERROR" \
+    "$(as_role "$EDITOR" -c "select living_assertions.retire('retire_me', NULL)")"
+check "control: retire() with a reason still works" "retired" \
+    "$(as_role "$EDITOR" -c "select living_assertions.retire('retire_me', 'retired on purpose by the test')" ; as_owner -c "select living_assertions.state('retire_me')")"
+check "declare(..., supersedes, NULL) is refused" "ERROR" \
+    "$(as_owner -c "select living_assertions.declare('zzzz_sorts_last', 'a softer claim of the same', 'select true as holds', 'zzzz_sorts_last', NULL, false)")"
+
+echo "F7: an unusable recorded path is one erroring assertion, not a failed run"
+as_owner -c "insert into living_assertions.assertions (name, claim, check_sql, search_path) values ('bad_path', 'its recorded path does not parse', 'select true as holds', '\"unterminated')" >/dev/null
+check "run_all() still records every assertion" "recorded_all=true" \
+    "$(as_owner -c "select 'recorded_all=' || (count(*) = (select count(*) from living_assertions.assertions where retired_at is null)) from living_assertions.run_all()")"
+check "  ...and the one with the bad path is erroring" "erroring" \
+    "$(as_owner -c "select living_assertions.state('bad_path')")"
+
+echo "F15: the recorded path is split as PostgreSQL splits it"
+as_owner -q -c 'create schema "we,ird"' -c 'create table "we,ird".t (ok boolean)' -c 'insert into "we,ird".t values (true)' >/dev/null
+as_owner -c "set search_path = \"we,ird\"" -c "select living_assertions.declare('comma_schema', 'a schema whose name has a comma', 'select bool_and(ok) as holds from t', p_check_now => false)" >/dev/null
+check "a quoted schema name with a comma in it resolves" "holds" \
+    "$(as_owner -c "select (living_assertions.run('comma_schema')).state")"
+as_owner -c "select set_config('search_path', 'PG_TEMP, public', false)" -c "select living_assertions.declare('upper_pg_temp', 'declared with PG_TEMP first, through set_config', 'select bool_and(balance >= 0) as holds from accounts', p_check_now => false)" >/dev/null
+check "control: the path was recorded as written" "PG_TEMP, public" \
+    "$(as_owner -c "select search_path from living_assertions.assertions where name = 'upper_pg_temp'")"
+check "an unquoted PG_TEMP first in the path does not let a temporary table answer" "broken" \
+    "$(as_owner -c "create temp table accounts (balance int)" -c "insert into accounts values (1)" -c "select (living_assertions.run('upper_pg_temp')).state" | tail -1)"
+
+echo "upgrade: an installation of 0.5.5 holding rows the new constraints refuse"
+UPGRADE_DB=living_assertions_test_audit_upgrade
+reclamar_base "$UPGRADE_DB"
+upgrade_out=$($PSQL -X -d "$UPGRADE_DB" -tA 2>&1 <<'SQL' || true
+CREATE EXTENSION pg_living_assertions VERSION '0.5.5';
+SELECT living_assertions.declare('old_one', 'declared on 0.5.5', 'select true as holds', p_check_now => false);
+SELECT living_assertions.retire('old_one', NULL);
+INSERT INTO living_assertions.checks (assertion, state, checked_at)
+    SELECT id, 'holds', 'infinity' FROM living_assertions.assertions WHERE name = 'old_one';
+ALTER EXTENSION pg_living_assertions UPDATE TO '0.5.6';
+SELECT 'version=' || extversion FROM pg_extension WHERE extname = 'pg_living_assertions';
+SELECT 'still_enforced=' || (SELECT count(*) FROM pg_constraint WHERE conname IN
+    ('retiring_an_assertion_cannot_be_silent', 'a_check_has_a_real_date') AND NOT convalidated);
+SQL
+)
+check "the upgrade completes" "version=0.5.6" "$upgrade_out"
+check "  ...and names the rows it could not validate" "not validated: rows written before it break it (assertions: old_one)" "$upgrade_out"
+check "  ...and the infinite check row" "(checks: " "$upgrade_out"
+check "  ...and both constraints are in place, enforced, not validated" "still_enforced=2" "$upgrade_out"
+
+if [ "$failures" -ne 0 ]; then
+    echo "$failures check(s) failed"
+    exit 1
+fi
+echo "the findings of the 0.5.5 audit are closed, each against its control"

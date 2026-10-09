@@ -250,8 +250,22 @@ path recorded when it was declared (since 0.4.0), so an unqualified name resolve
 the way it did for whoever declared it -- convenient, and no protection: anyone
 who can create objects in a schema on that path can shadow a name. What the
 evaluator does pin, since 0.5.5, is `pg_temp`: it always goes LAST, so a
-temporary table of the session that evaluates can never stand in for the table
-a check names (`make check-pgtemp`). Qualify the names a check depends on.
+temporary table of the session that evaluates cannot stand in for a table the
+check finds earlier in its path (`make check-pgtemp`). It still answers for a
+name found nowhere else: if the real table is renamed or dropped, a temporary
+table of that name satisfies the check instead of the check erroring. Qualify
+the names a check depends on.
+
+The recorded path is applied only inside the sealed subtransaction, since 0.5.6,
+and undone with it: the session that called `run()` keeps the path it had, and
+`run()`'s own work never runs under the author's. Until 0.5.6 it stayed in the
+caller's session after `run()` returned -- see below.
+
+**A role allowed to run checks can write a verdict.** `run()` runs as its caller,
+so its caller needs `INSERT` on `checks`, and with it can insert a row of its own.
+Since 0.5.6 such a row cannot be dated `'infinity'`, and the latest verdict is the
+last row written, not the one dated latest, so a forged row lasts until the next
+honest check. Grant `INSERT` on `checks` only to roles you trust to run them.
 
 ## What it does not do
 
@@ -366,6 +380,21 @@ answer `holds` for a failing assertion. It matters when the check runs in someon
 else's session with the owner's rights -- a `SECURITY DEFINER` caller such as
 pg_agent_gate. Measured on 0.5.4 and pinned by `test/pg_temp.sh`. Every
 function now names `pg_temp` last; no table changes, every recorded verdict stays.
+
+**0.5.6 closes an external audit of 0.5.5** (`test/audit.sh`, `make check-audit`,
+every tooth red on 0.5.5 with its control green). `run()` left the assertion's
+recorded `search_path` in the caller's session: 0.5.5 applied it with
+`set_config(..., false)` and said the function's `SET` clause would undo that on
+exit, and it does not -- a plain `SET` overrides the clause and outlives the
+function. After `run_all()`, a runner's next unqualified call reached a function
+in the author's schema, also inside a `SECURITY DEFINER` wrapper with its own
+path; and with a path of `evil, pg_catalog`, `run()`'s own `clock_timestamp()` was
+the author's, run as the runner. The path is now applied inside the seal. Also: a
+verdict row dated `'infinity'` outranked every honest one forever; `search_path`,
+`declared_by`, `why_changed` and a retirement could be edited in place; a `NULL`
+reason passed the checks that make retiring and replacing cost one; an unparsable
+recorded path failed `run_all()` for everyone. An installation already holding
+such rows upgrades, is told which, and keeps them: the record is append-only.
 
 ## Related work
 

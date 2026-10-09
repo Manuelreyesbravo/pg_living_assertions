@@ -12,7 +12,8 @@ DATA         = pg_living_assertions--0.1.0.sql \
                pg_living_assertions--0.5.1--0.5.2.sql \
                pg_living_assertions--0.5.2--0.5.3.sql \
                pg_living_assertions--0.5.3--0.5.4.sql \
-               pg_living_assertions--0.5.4--0.5.5.sql
+               pg_living_assertions--0.5.4--0.5.5.sql \
+               pg_living_assertions--0.5.5--0.5.6.sql
 PG_CONFIG   ?= pg_config
 
 # One installcheck, no dependencies -- the same lesson the rest of the family
@@ -25,7 +26,7 @@ REGRESS_OPTS = --inputdir=test --outputdir=test
 # stopped afterwards, whatever the suites answered. PostgreSQL 18 or later: the
 # cluster loads this checkout through extension_control_path. CI runs exactly
 # this on 18 and 19.
-SUITES = check-pgtemp check-privs check-dump
+SUITES = check-pgtemp check-privs check-dump check-audit
 .PHONY: check-suites
 check-suites:
 	@PG_CONFIG=$(PG_CONFIG) bash ./test/cluster.sh init
@@ -66,6 +67,12 @@ check-privs:
 .PHONY: check-pgtemp
 check-pgtemp:
 	@PSQL=$(shell $(PG_CONFIG) --bindir)/psql bash ./test/pg_temp.sh
+
+# The findings of the external audit of 0.5.5, each against its control. Needs
+# other roles, like check-privs.
+.PHONY: check-audit
+check-audit:
+	@PSQL=$(shell $(PG_CONFIG) --bindir)/psql bash ./test/audit.sh
 
 .PHONY: check-dump
 check-dump:
