@@ -5,6 +5,27 @@ Each upgrade script (`pg_living_assertions--OLD--NEW.sql`) documents, in its own
 header, exactly what changed and why; that is the authoritative per-version
 record.
 
+## 0.5.10 -- 2026-10-09
+
+SET ROLE is not a boundary, so a check no longer runs under one (external audit, round 5).
+
+* **A check cannot leave the role it runs as.** From 0.5.8 it ran after `SET ROLE` to its
+  author, and a function it called ran `RESET ROLE`, `SET SESSION AUTHORIZATION DEFAULT` or
+  `set_config('role', ...)` and was the caller again -- a superuser, in the usual cron -- then ran
+  a program or cancelled the caller's backend (F6 too). The check now runs in a temporary
+  `SECURITY DEFINER` function its author owns, created and rolled back inside the seal; there
+  PostgreSQL refuses to change role or session authorization at all. Skipped only where it
+  cannot change anything: the owner's cron running the owner's checks costs what it cost; a
+  check in a frame costs about 0.5 ms more.
+* **A `SECURITY DEFINER` caller runs another role's checks as that role** when its owner may
+  act as it; until 0.5.9 they were `erroring` there.
+* `_evaluate` is `VOLATILE`: the seal, not the volatility, is what keeps a check from writing.
+* `test/sql/frame.sql` exercises the frame in installcheck, so CI covers it on every version;
+  `test/audit.sh` adds S1, each way back red on 0.5.9 with its control.
+* `ci/upgrade_check.sh` compares column comments too (F17 stays closed, now watched).
+* README: who reads `status` (the owner's to grant: it carries `detail`) and who reads
+  `state()`/`stale()` (anyone given the schema).
+
 ## 0.5.9 -- 2026-10-09
 
 The Medium and Low findings of the external audit of 0.5.5 left open, each measured on 0.5.8

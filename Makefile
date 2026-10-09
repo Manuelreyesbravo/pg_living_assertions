@@ -16,13 +16,14 @@ DATA         = pg_living_assertions--0.1.0.sql \
                pg_living_assertions--0.5.5--0.5.6.sql \
                pg_living_assertions--0.5.6--0.5.7.sql \
                pg_living_assertions--0.5.7--0.5.8.sql \
-               pg_living_assertions--0.5.8--0.5.9.sql
+               pg_living_assertions--0.5.8--0.5.9.sql \
+               pg_living_assertions--0.5.9--0.5.10.sql
 PG_CONFIG   ?= pg_config
 
 # One installcheck, no dependencies -- the same lesson the rest of the family
 # took: an installcheck that fails because of something the user does not have
 # trains the user to ignore it.
-REGRESS      = basic read_only recorded_path
+REGRESS      = basic read_only recorded_path frame
 REGRESS_OPTS = --inputdir=test --outputdir=test
 
 # Every suite in SUITES, in a throwaway cluster built from PG_CONFIG's binaries and

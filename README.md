@@ -98,6 +98,11 @@ waiting.
 This is the whole thesis in one view: a stale `holds` looks exactly like a fresh
 one and means something completely different.
 
+Who reads what: `state()`, `assert_holds()` and `stale()` are open to any role
+given `USAGE` on the schema -- a name, a verdict and its age. The `status` view
+is not: it carries each check's `detail`, which is whatever the check chose to
+report and may be data, so it is the owner's to grant, like the tables under it.
+
 ## `declare_unchanged` -- approve what something says today
 
 "Approve what this expression evaluates to now, and tell me when it changes" is
@@ -229,12 +234,30 @@ in a runbook, or in a monitor that only knows OK and CRITICAL.
 
 This registry stores SQL and later runs it when somebody else calls `run()` --
 usually a cron job owned by someone with more rights than whoever wrote the
-check. **Since 0.5.8 a check runs as the role that declared it.** Inside the
-sealed subtransaction, after read-only and the recorded path, the evaluator does
-`SET ROLE` to `declared_by` (not when that is already the current user, the
-common case), so a stored check can read and do exactly what its author could,
-and no more. Whatever needs more is that assertion's `erroring`. A session
-advisory lock taken by a check is released when the seal ends.
+check. **Since 0.5.8 a check runs as the role that declared it, and since 0.5.10
+it cannot become anyone else.** Inside the sealed subtransaction the evaluator
+creates a temporary `SECURITY DEFINER` function holding the check, hands it to
+`declared_by`, and runs the check by calling it; the function is rolled back with
+the seal. Inside a `SECURITY DEFINER` function PostgreSQL refuses to change `role`
+or `session_authorization` at all, for everything it calls, so a stored check can
+read and do exactly what its author could, and no more. Whatever needs more is
+that assertion's `erroring`. A session advisory lock taken by a check is released
+when the seal ends.
+
+In 0.5.8 and 0.5.9 the evaluator did `SET ROLE` to the author instead, and an
+external audit (round 5) measured why that is not a boundary: `SET ROLE` changes
+`current_user` and nothing else, so a function the check called ran `RESET ROLE`,
+`SET SESSION AUTHORIZATION DEFAULT` or `set_config('role', ...)` and was the
+caller again -- a superuser, in the usual cron -- and from there ran a program or
+cancelled the caller's backend. `make check-audit` (S1) and `test/sql/frame.sql`
+show each way back refused, against a control that shows it working under `SET
+ROLE`.
+
+The frame is skipped only where it cannot change anything: the author is the
+current user and either the call already runs inside a `SECURITY DEFINER`
+function, or the author is also the session user and the role that logged in --
+the owner's cron running the owner's checks. Measured on PostgreSQL 19, a check
+run in a frame costs about 0.5 ms more than one run directly.
 
 Until 0.5.7 a check ran with the caller's privileges, and this section said so:
 whoever could `INSERT` into `assertions` could run SQL as every future caller of
@@ -242,13 +265,16 @@ whoever could `INSERT` into `assertions` could run SQL as every future caller of
 external audit measured the rest: `COPY ... TO PROGRAM` is a read, so a check ran
 a program as the caller.
 
-What it asks of the caller: it must be able to `SET ROLE` to each author. A
-superuser can; another role needs membership. PostgreSQL forbids `SET ROLE`
-inside a `SECURITY DEFINER` function, so such a caller -- pg_agent_gate binding
-an assertion, for one -- runs the checks its owner declared, and the others are
-`erroring` with that reason rather than running as the owner. `declared_by`
-defaults to whoever declares, and a trigger accepts another name only from a
-role that may become it.
+What it asks of the caller: it must be able to hand the frame to each author. A
+superuser can; another role must be able to `SET ROLE` to the author, and the
+author needs `TEMP` on the database (`PUBLIC` has it by default). What is missing
+is that assertion's `erroring`, with the reason, rather than the check running as
+the caller. That includes a `SECURITY DEFINER` caller -- pg_agent_gate binding an
+assertion, for one: since 0.5.10 it runs another role's checks as that role when
+its owner may act as it (until 0.5.9 they were `erroring` there). A role that can
+already act as the caller -- a member of it -- gains nothing it did not have.
+`declared_by` defaults to whoever declares, and a trigger accepts another name
+only from a role that may become it.
 
 **It is closed by default, and that is verified rather than assumed.** A role
 with `USAGE` on the schema still gets `permission denied for table assertions`,
@@ -300,9 +326,10 @@ honest check. Grant `INSERT` on `checks` only to roles you trust to run them.
 - **The seal does not undo what leaves the transaction**: a `nextval()` on a
   **temporary** sequence, `dblink`, a foreign data wrapper, a function in an
   untrusted language that writes a file, `COPY ... TO PROGRAM`. A session-level
-  advisory lock is released when the seal ends (0.5.8). Since 0.5.8 a check runs as
-  the role that declared it, so whatever it reaches, it reaches with its author's
-  rights and not the caller's; declaring an assertion is still a privilege (below).
+  advisory lock is released when the seal ends (0.5.8). A check runs as the role
+  that declared it and, since 0.5.10, cannot leave it, so whatever it reaches, it
+  reaches with its author's rights and not the caller's; declaring an assertion
+  is still a privilege (below).
 
 ## Tested on
 

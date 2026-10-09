@@ -19,6 +19,12 @@
 #       PROGRAM as whoever ran it, and could leave a session advisory lock behind.
 #   F6  a check that cancelled its own backend aborted run_all() for every assertion.
 #       From 0.5.8 a check runs as the role that declared it.
+#   S1  (round 5, on 0.5.9) SET ROLE is not a boundary: a function the check called ran
+#       RESET ROLE, SET SESSION AUTHORIZATION DEFAULT or set_config('role', ...) and was
+#       the runner again -- a program ran, the backend was cancelled. From 0.5.10 the check
+#       runs in a SECURITY DEFINER frame its author owns, where PostgreSQL refuses all three.
+#       The last line of that block (no frame left behind) is hygiene, not a tooth: 0.5.9
+#       builds no frame, so it passes there too.
 #   F8  declare_unchanged: a value that disappeared (NULL) read unknown, "not a failure".
 #   F12 declared_at and a retirement could be written by the author at insert.
 #   F13 TRUNCATE emptied the append-only tables.
@@ -210,8 +216,38 @@ check "a check that cancels its backend does not abort run_all()" "recorded_all=
     "$(as_owner -c "select 'recorded_all=' || (count(*) = (select count(*) from living_assertions.assertions where retired_at is null)) from living_assertions.run_all()" 2>&1)"
 check "a role with INSERT on assertions cannot sign one as the superuser" "cannot act as" \
     "$(as_role "$AUTHOR" -c "insert into living_assertions.assertions (name, claim, check_sql, declared_by) select 'f9_forged', 'signed as someone else', 'select true as holds', rolname from pg_roles where rolsuper limit 1")"
-check "a SECURITY DEFINER caller cannot run another role's check as itself" "security-definer" \
-    "$(as_owner -c "create or replace function public.vouch(p text) returns text language sql security definer set search_path = pg_catalog as \$\$ select (living_assertions.run(p)).detail \$\$" -c "select public.vouch('f9_lock')" | tail -1)"
+check "a SECURITY DEFINER caller runs another role's check as that role, not as itself" "holds" \
+    "$(as_role "$AUTHOR" -q -c "select living_assertions.declare('s1_who', 'the check runs as its author', 'select current_user = ''$AUTHOR'' as holds', p_check_now => false)" >/dev/null
+       as_owner -c "create or replace function public.vouch(p text) returns text language sql security definer set search_path = pg_catalog as \$\$ select (living_assertions.run(p)).state \$\$" -c "select public.vouch('s1_who')" | tail -1)"
+
+echo "S1 (round 5): a check cannot leave the role it runs as"
+# SET ROLE changes current_user and nothing else: until 0.5.9 a function the check called ran
+# RESET ROLE, SET SESSION AUTHORIZATION DEFAULT or set_config('role', ...) and was the runner
+# again. Each way back, then a program run as whoever that is.
+as_role "$AUTHOR" -q \
+    -c "create function evil.back_reset() returns boolean language plpgsql volatile as \$\$ begin reset role; copy (select 1) to program 'touch $PWN'; return true; end \$\$" \
+    -c "create function evil.back_session() returns boolean language plpgsql volatile as \$\$ begin execute 'set session authorization default'; copy (select 1) to program 'touch $PWN'; return true; end \$\$" \
+    -c "create function evil.back_config() returns boolean language plpgsql volatile as \$\$ begin perform set_config('role', session_user, true); copy (select 1) to program 'touch $PWN'; return true; end \$\$" \
+    -c "create function evil.back_cancel() returns boolean language plpgsql volatile as \$\$ begin reset role; return pg_cancel_backend(pg_backend_pid()) and pg_sleep(1) is not null; end \$\$" \
+    -c "select living_assertions.declare('s1_reset', 'reset role, then a program', 'select evil.back_reset() as holds', p_check_now => false)" \
+    -c "select living_assertions.declare('s1_session', 'session authorization default, then a program', 'select evil.back_session() as holds', p_check_now => false)" \
+    -c "select living_assertions.declare('s1_config', 'set_config role, then a program', 'select evil.back_config() as holds', p_check_now => false)" \
+    -c "select living_assertions.declare('s1_cancel', 'reset role, then cancel the backend', 'select evil.back_cancel() as holds', p_check_now => false)" >/dev/null
+rm -f "$PWN"
+check "control: under SET ROLE to the author, RESET ROLE is the superuser again and the program runs" "ran=t" \
+    "$(as_owner -c "begin" -c "set local role $AUTHOR" -c "select evil.back_reset()" -c "rollback" >/dev/null; [ -f "$PWN" ] && echo ran=t || echo ran=f)"
+for way in reset session config; do
+    rm -f "$PWN"
+    check "s1_$way: run() by the superuser runs no program" "ran=f" \
+        "$(as_owner -c "select (living_assertions.run('s1_$way')).state" >/dev/null; [ -f "$PWN" ] && echo ran=t || echo ran=f)"
+    check "  ...and says the check tried to change the role it runs as" "tried to change the role" \
+        "$(as_owner -c "select detail from living_assertions.status where name = 's1_$way'")"
+done
+check "s1_cancel: RESET ROLE and a cancel do not abort run_all()" "recorded_all=true" \
+    "$(as_owner -c "select 'recorded_all=' || (count(*) = (select count(*) from living_assertions.assertions where retired_at is null)) from living_assertions.run_all()" 2>&1)"
+check "the frame the seal builds is rolled back with it" "frames=0" \
+    "$(as_owner -c "select (living_assertions.run('s1_who')).state" -c "select 'frames=' || count(*) from pg_proc where proname = 'living_assertions_sealed_check'" | tail -1)"
+rm -f "$PWN"
 
 echo "F8: a fingerprinted value that disappears is broken"
 as_owner -q -c "create table cfg (k text, v text)" -c "insert into cfg values ('mode', 'strict')" \

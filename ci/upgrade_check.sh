@@ -46,8 +46,11 @@ SELECT pg_describe_object(d.classid, d.objid, 0) || ' | ' ||
                     coalesce(pg_get_viewdef(d.objid),
                              -- by name, not position: ALTER TABLE ADD COLUMN in an
                              -- upgrade script always appends, so an upgraded table
-                             -- can only match a fresh one in its set of columns
-                             (SELECT string_agg(a.attname || ' ' || format_type(a.atttypid, a.atttypmod), ', ' ORDER BY a.attname)
+                             -- can only match a fresh one in its set of columns.
+                             -- Each with its comment: an upgrade path that skipped
+                             -- one was the external audit's F17.
+                             (SELECT string_agg(a.attname || ' ' || format_type(a.atttypid, a.atttypmod)
+                                                || coalesce(' -- ' || col_description(a.attrelid, a.attnum), ''), ', ' ORDER BY a.attname)
                                 FROM pg_attribute a WHERE a.attrelid = d.objid AND a.attnum > 0 AND NOT a.attisdropped))
                 END, '') || ' | ' ||
        coalesce(obj_description(d.objid, (SELECT relname FROM pg_class WHERE oid = d.classid)), '')

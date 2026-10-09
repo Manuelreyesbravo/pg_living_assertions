@@ -1,0 +1,51 @@
+-- SET ROLE IS NOT A BOUNDARY. Until 0.5.9 a check ran after SET ROLE to the role that declared
+-- it, and a function the check called could RESET ROLE -- or SET SESSION AUTHORIZATION DEFAULT,
+-- or set_config('role', ...) -- and be whoever called run() again, usually a superuser. From
+-- 0.5.10 a check declared by another role runs in a SECURITY DEFINER frame that role owns,
+-- where PostgreSQL refuses all three. This runs on every version the CI covers, so the frame is
+-- exercised there and not only where the script suites run.
+\set VERBOSITY terse
+
+CREATE EXTENSION pg_living_assertions;
+CREATE ROLE regress_la_frame_author;
+GRANT USAGE ON SCHEMA living_assertions TO regress_la_frame_author;
+GRANT EXECUTE ON FUNCTION living_assertions.declare(text, text, text, text, text, boolean) TO regress_la_frame_author;
+GRANT SELECT, INSERT ON living_assertions.assertions TO regress_la_frame_author;
+CREATE SCHEMA regress_la_frame AUTHORIZATION regress_la_frame_author;
+
+SET ROLE regress_la_frame_author;
+CREATE FUNCTION regress_la_frame.back_reset() RETURNS boolean LANGUAGE plpgsql AS
+  $$ BEGIN RESET ROLE; RETURN current_user <> 'regress_la_frame_author'; END $$;
+CREATE FUNCTION regress_la_frame.back_session() RETURNS boolean LANGUAGE plpgsql AS
+  $$ BEGIN EXECUTE 'SET SESSION AUTHORIZATION DEFAULT'; RETURN true; END $$;
+CREATE FUNCTION regress_la_frame.back_config() RETURNS boolean LANGUAGE plpgsql AS
+  $$ BEGIN PERFORM set_config('role', session_user, true); RETURN true; END $$;
+SELECT living_assertions.declare('frame_reset', 'reset role inside a check', 'select regress_la_frame.back_reset() as holds', NULL, NULL, false) > 0 AS declared;
+SELECT living_assertions.declare('frame_session', 'session authorization inside a check', 'select regress_la_frame.back_session() as holds', NULL, NULL, false) > 0 AS declared;
+SELECT living_assertions.declare('frame_config', 'set_config role inside a check', 'select regress_la_frame.back_config() as holds', NULL, NULL, false) > 0 AS declared;
+SELECT living_assertions.declare('frame_who', 'a check runs as its author', 'select current_user = ''regress_la_frame_author'' as holds', NULL, NULL, false) > 0 AS declared;
+RESET ROLE;
+
+-- Control: under plain SET ROLE, which is what 0.5.9 did, the way back works.
+BEGIN;
+SET LOCAL ROLE regress_la_frame_author;
+SELECT regress_la_frame.back_reset() AS control_back_to_the_superuser;
+ROLLBACK;
+
+-- Run by the superuser, each check stays its author's.
+SELECT a.name, r.state, r.detail LIKE 'the check tried to change the role it runs as%' AS refused_to_change_role
+  FROM living_assertions.assertions a, LATERAL living_assertions.run(a.name) r
+ WHERE a.name LIKE 'frame\_%' ORDER BY a.name;
+SELECT count(*) AS frames_left FROM pg_proc WHERE proname = 'living_assertions_sealed_check';
+SELECT current_user = session_user AS session_unchanged, current_setting('transaction_read_only') AS read_only_after;
+
+-- A SECURITY DEFINER caller runs another role's check as that role, not as itself.
+CREATE FUNCTION public.regress_la_frame_vouch(p text) RETURNS text LANGUAGE sql SECURITY DEFINER
+  SET search_path = pg_catalog AS $$ SELECT (living_assertions.run(p)).state $$;
+SELECT public.regress_la_frame_vouch('frame_who') AS vouched;
+
+DROP FUNCTION public.regress_la_frame_vouch(text);
+DROP EXTENSION pg_living_assertions CASCADE;
+DROP SCHEMA regress_la_frame CASCADE;
+DROP OWNED BY regress_la_frame_author;
+DROP ROLE regress_la_frame_author;
