@@ -8,8 +8,8 @@
 -- not named in search_path, and no path in this extension named it:
 --
 --   * run() evaluates the check under the declarer's search_path ("$user", public, as
---     usual). A check written the way anyone writes it -- `from cuentas`, no schema --
---     read the evaluating session's `pg_temp.cuentas` if it had one.
+--     usual). A check written the way anyone writes it -- `from accounts`, no schema --
+--     read the evaluating session's `pg_temp.accounts` if it had one.
 --   * run() looked the assertion up with `FROM assertions` under its own path
 --     (living_assertions, pg_catalog). A temporary `assertions` with a forged row
 --     carrying the name of a failing assertion and the id of one that holds made run()

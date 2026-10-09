@@ -84,19 +84,19 @@ SELECT assert_holds('nobody_declared_this');
 -- ------------------------------------------- declare_unchanged (0.2.0) --
 -- The shape two of the four guards were writing by hand: approve what an
 -- expression says today, and report when it changes.
-CREATE TABLE mundo (x int);
-INSERT INTO mundo VALUES (1), (2);
+CREATE TABLE world (x int);
+INSERT INTO world VALUES (1), (2);
 
 SELECT declare_unchanged('the_world',
-                         'the contents of mundo are what I approved',
-                         'select string_agg(x::text, $$,$$ ORDER BY x) from mundo') > 0 AS approved;
+                         'the contents of world are what I approved',
+                         'select string_agg(x::text, $$,$$ ORDER BY x) from world') > 0 AS approved;
 SELECT state('the_world') AS right_after_approving;
 SELECT detail FROM status WHERE name = 'the_world';
 
 -- The world moves. Nobody re-supplies the value: the stored check re-evaluates
 -- the EXPRESSION, which is the whole point -- a stored value would be compared
 -- against itself forever and could never fail.
-INSERT INTO mundo VALUES (3);
+INSERT INTO world VALUES (3);
 SELECT (run('the_world')).state AS after_the_world_moved;
 SELECT detail LIKE 'approved %, now %' AS says_both_sides FROM status WHERE name = 'the_world';
 

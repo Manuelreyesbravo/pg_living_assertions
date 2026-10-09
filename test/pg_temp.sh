@@ -1,25 +1,25 @@
 #!/usr/bin/env bash
-# Puede la sesion que EVALUA una asercion cambiar la tabla que el chequeo lee?
+# Can the session that EVALUATES an assertion change the table the check reads?
 #
-# run() evalua el chequeo con el search_path de quien lo DECLARO ("$user",
-# public, lo normal), y ese path no nombra pg_temp. PostgreSQL busca pg_temp
-# PRIMERO para tablas cuando no esta en la lista. Entonces un chequeo escrito
-# como cualquiera lo escribe -- `from cuentas`, sin esquema -- lee la tabla
-# temporal de la sesion que lo esta corriendo, si esa sesion creo una.
+# run() evaluates the check with the search_path of whoever DECLARED it ("$user",
+# public, the usual), and that path does not name pg_temp. PostgreSQL searches
+# pg_temp FIRST for tables when it is not in the list. So a check written the way
+# anyone writes it -- `from accounts`, no schema -- reads the temporary table of
+# the session running it, if that session created one.
 #
-# Contra uno mismo eso no es nada. Pasa a ser un problema cuando el chequeo corre
-# en la sesion de OTRO y con los privilegios del dueno: una funcion SECURITY
-# DEFINER del dueno que llama a run(). Es exactamente lo que hace pg_agent_gate
-# (agent_gate_internal._run_assertion) dentro del commit de un agente: un agente
-# con allow_ddl crea `pg_temp.cuentas` sana, rompe la de verdad, y la asercion
-# que debia deshacer el cambio dice `holds`.
+# Against yourself that is nothing. It becomes a problem when the check runs in
+# SOMEBODY ELSE's session and with the owner's privileges: a SECURITY DEFINER
+# function of the owner that calls run(). That is exactly what pg_agent_gate does
+# (agent_gate_internal._run_assertion) inside an agent's commit: an agent with
+# allow_ddl creates a healthy `pg_temp.accounts`, breaks the real one, and the
+# assertion that should have undone the change says `holds`.
 #
-# LAS DOS MITADES: sin tabla temporal la asercion tiene que decir `broken` (el
-# control: el instrumento sabe dar rojo), y con ella tambien.
+# BOTH HALVES: without a temporary table the assertion has to say `broken` (the
+# control: the instrument can give red), and with one too.
 #
-# Crea y borra roles y una base, como test/privilegios.sh: corre contra el
-# cluster desechable de test/cluster.sh, y test/guardia.sh se detiene si los
-# nombres ya existen.
+# Creates and drops roles and a database, like test/privileges.sh: runs against
+# the throwaway cluster of test/cluster.sh, and test/guard.sh stops if the names
+# already exist.
 #
 #   PG_CONFIG=/path/to/pg_config test/cluster.sh init
 #   PG_CONFIG=/path/to/pg_config test/cluster.sh start
@@ -27,85 +27,85 @@
 
 set -euo pipefail
 
-source "$(dirname "${BASH_SOURCE[0]}")/guardia.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/guard.sh"
 
-BASE=living_assertions_test_pg_temp
-FORASTERO=living_assertions_test_pg_temp_forastero
-fallos=0
+DB=living_assertions_test_pg_temp
+STRANGER=living_assertions_test_pg_temp_stranger
+failures=0
 
-trap soltar_lo_reclamado EXIT
-exige_cluster
-reclamar_base "$BASE"
-reclamar_rol "$FORASTERO"
+trap release_claimed EXIT
+require_throwaway_cluster
+claim_database "$DB"
+claim_role "$STRANGER"
 
-$PSQL -d "$BASE" -q -v ON_ERROR_STOP=1 -v forastero="$FORASTERO" <<'SQL'
+$PSQL -d "$DB" -q -v ON_ERROR_STOP=1 -v stranger="$STRANGER" <<'SQL'
 CREATE EXTENSION pg_living_assertions;
 
--- La invariante: ningun saldo negativo. La tabla real la rompe.
-CREATE TABLE cuentas (saldo int);
-INSERT INTO cuentas VALUES (100), (-50);
+-- The invariant: no negative balance. The real table breaks it.
+CREATE TABLE accounts (balance int);
+INSERT INTO accounts VALUES (100), (-50);
 
--- Declarada como la escribe cualquiera: sin esquema, con el search_path de
--- siempre ("$user", public).
-SELECT living_assertions.declare('sin_saldo_negativo', 'ningun saldo es negativo',
-       'select bool_and(saldo >= 0) as holds from cuentas', p_check_now => false);
+-- Declared the way anyone writes it: no schema, with the usual search_path
+-- ("$user", public).
+SELECT living_assertions.declare('no_negative_balance', 'no balance is negative',
+       'select bool_and(balance >= 0) as holds from accounts', p_check_now => false);
 
--- El patron de pg_agent_gate: el dueno corre la asercion en nombre de otro.
-CREATE FUNCTION vigilar(p text) RETURNS text LANGUAGE sql SECURITY DEFINER
+-- The pg_agent_gate pattern: the owner runs the assertion on behalf of someone else.
+CREATE FUNCTION watch(p text) RETURNS text LANGUAGE sql SECURITY DEFINER
     SET search_path = pg_catalog
     AS $$ SELECT (living_assertions.run(p)).state $$;
-REVOKE ALL ON FUNCTION vigilar(text) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION vigilar(text) TO :"forastero";
+REVOKE ALL ON FUNCTION watch(text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION watch(text) TO :"stranger";
 SQL
 
-comprobar() {
-    local que="$1" esperado="$2" obtenido="$3"
-    if [[ "$obtenido" == *"$esperado"* ]]; then
-        echo "  ok   $que"
+check() {
+    local what="$1" expected="$2" got="$3"
+    if [[ "$got" == *"$expected"* ]]; then
+        echo "  ok   $what"
     else
-        echo "  FAIL $que"
-        echo "       esperaba: $esperado"
-        echo "       obtuvo:   $obtenido"
-        fallos=$((fallos + 1))
+        echo "  FAIL $what"
+        echo "       expected: $expected"
+        echo "       got:      $got"
+        failures=$((failures + 1))
     fi
 }
 
-# El control: sin tabla temporal, la tabla real esta rota y la asercion lo dice.
-comprobar "sin tabla temporal, la asercion ve la tabla real rota" "broken" \
-    "$(PGUSER=$FORASTERO $PSQL -d "$BASE" -tAc "select vigilar('sin_saldo_negativo')" 2>&1 || true)"
+# The control: without a temporary table, the real table is broken and the assertion says so.
+check "without a temporary table, the assertion sees the real table broken" "broken" \
+    "$(PGUSER=$STRANGER $PSQL -d "$DB" -tAc "select watch('no_negative_balance')" 2>&1 || true)"
 
-# EL CASO: la misma sesion crea una tabla temporal con el nombre de la del
-# chequeo, sana, y pide la evaluacion. Una sola sesion: la tabla temporal es suya.
-salida=$(PGUSER=$FORASTERO $PSQL -d "$BASE" -tA \
-    -c "create temp table cuentas (saldo int)" \
-    -c "insert into cuentas values (1)" \
-    -c "select vigilar('sin_saldo_negativo')" 2>&1 || true)
-comprobar "una tabla temporal de la sesion que evalua NO suplanta la tabla del chequeo" "broken" "$salida"
+# THE CASE: the same session creates a temporary table with the name of the check's
+# table, healthy, and asks for the evaluation. One session: the temporary table is its own.
+out=$(PGUSER=$STRANGER $PSQL -d "$DB" -tA \
+    -c "create temp table accounts (balance int)" \
+    -c "insert into accounts values (1)" \
+    -c "select watch('no_negative_balance')" 2>&1 || true)
+check "a temporary table of the evaluating session does NOT replace the check's table" "broken" "$out"
 
-# Y lo que queda registrado tiene que ser la verdad, no lo que la sesion fabrico.
-comprobar "  ...y el registro dice broken" "broken" \
-    "$($PSQL -d "$BASE" -tAc "select state from living_assertions.checks order by id desc limit 1" 2>&1 || true)"
+# And what gets recorded has to be the truth, not what the session forged.
+check "  ...and the record says broken" "broken" \
+    "$($PSQL -d "$DB" -tAc "select state from living_assertions.checks order by id desc limit 1" 2>&1 || true)"
 
-# EL SEGUNDO CAMINO: run() busca la asercion con `FROM assertions` bajo su propio
-# path (living_assertions, pg_catalog), donde pg_temp tambien va primero. _evaluate
-# vuelve a leer el chequeo POR ID y con esquema, asi que una fila falsa no trae su
-# propio SQL -- pero si el id de OTRA asercion real, una que se cumple: run()
-# evalua esa y devuelve su `holds` por la que debia fallar. Medido en 0.5.4 con el
-# id de la propia (1): broken, y por eso el diente apunta a otra.
-id_que_se_cumple=$($PSQL -d "$BASE" -tAc "select living_assertions.declare('siempre', 'algo que se cumple', 'select true as holds')")
-columnas=$($PSQL -d "$BASE" -tAc "select string_agg(quote_ident(attname) || ' ' || format_type(atttypid, atttypmod), ', ' order by attnum) from pg_attribute where attrelid = 'living_assertions.assertions'::regclass and attnum > 0 and not attisdropped")
-salida=$(PGUSER=$FORASTERO $PSQL -d "$BASE" -tA \
-    -c "create temp table assertions ($columnas)" \
-    -c "insert into assertions (id, name, claim, check_sql, search_path) values ($id_que_se_cumple, 'sin_saldo_negativo', 'falsa', 'select true as holds', 'public')" \
-    -c "select vigilar('sin_saldo_negativo')" 2>&1 || true)
-comprobar "una tabla temporal 'assertions' de la sesion que evalua NO suplanta el registro" "broken" "$salida"
+# THE SECOND PATH: run() looks the assertion up with `FROM assertions` under its own
+# path (living_assertions, pg_catalog), where pg_temp also goes first. _evaluate
+# reads the check again BY ID and schema-qualified, so a forged row does not bring its
+# own SQL -- but it does bring the id of ANOTHER real assertion, one that holds: run()
+# evaluates that one and returns its `holds` for the one that should fail. Measured on
+# 0.5.4 with the assertion's own id (1): broken, and that is why the tooth points at another.
+holding_id=$($PSQL -d "$DB" -tAc "select living_assertions.declare('always', 'something that holds', 'select true as holds')")
+columns=$($PSQL -d "$DB" -tAc "select string_agg(quote_ident(attname) || ' ' || format_type(atttypid, atttypmod), ', ' order by attnum) from pg_attribute where attrelid = 'living_assertions.assertions'::regclass and attnum > 0 and not attisdropped")
+out=$(PGUSER=$STRANGER $PSQL -d "$DB" -tA \
+    -c "create temp table assertions ($columns)" \
+    -c "insert into assertions (id, name, claim, check_sql, search_path) values ($holding_id, 'no_negative_balance', 'forged', 'select true as holds', 'public')" \
+    -c "select watch('no_negative_balance')" 2>&1 || true)
+check "a temporary 'assertions' table of the evaluating session does NOT replace the registry" "broken" "$out"
 
-# Lo que no puede romperse: el dueno, en su propia sesion, sigue evaluando.
-comprobar "el dueno sigue evaluando en su sesion" "broken" \
-    "$($PSQL -d "$BASE" -tAc "select (living_assertions.run('sin_saldo_negativo')).state" 2>&1 || true)"
+# What must not break: the owner, in their own session, still evaluates.
+check "the owner still evaluates in their own session" "broken" \
+    "$($PSQL -d "$DB" -tAc "select (living_assertions.run('no_negative_balance')).state" 2>&1 || true)"
 
-if [ "$fallos" -ne 0 ]; then
-    echo "$fallos comprobacion(es) fallaron"
+if [ "$failures" -ne 0 ]; then
+    echo "$failures check(s) failed"
     exit 1
 fi
-echo "una tabla temporal de quien evalua no cambia lo que la asercion lee"
+echo "a temporary table of whoever evaluates does not change what the assertion reads"

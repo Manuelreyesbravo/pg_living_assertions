@@ -52,7 +52,7 @@ first (`test/audit.sh`: every tooth red there with its control green).
 
 * **A check runs as the role that declared it** (external audit: F9, F6; the same class
   as pg_plan_guard's PG-S1). Up to 0.5.7 it ran with the privileges of whoever called
-  `run()` -- documented, and demonstrated by `test/privilegios.sh` reading the owner's
+  `run()` -- documented, and demonstrated by `test/privileges.sh` reading the owner's
   secret through a trusted role's check. The seal bounded writes to the database and
   nothing else: `COPY ... TO PROGRAM` is a read, so a check ran a program as the caller;
   a session advisory lock stayed in the caller's session; and a check that cancelled its
@@ -66,7 +66,7 @@ first (`test/audit.sh`: every tooth red there with its control green).
 * **Behaviour change for callers.** A caller must be able to `SET ROLE` to each author; a
   superuser can. A `SECURITY DEFINER` caller -- pg_agent_gate binding an assertion -- runs
   the checks its owner declared; the others are `erroring`, with the reason.
-* `test/audit.sh`: the F9/F6 teeth, and `test/privilegios.sh` inverted -- red on 0.5.7
+* `test/audit.sh`: the F9/F6 teeth, and `test/privileges.sh` inverted -- red on 0.5.7
   with their controls green.
 
 ## 0.5.7 -- 2026-10-08
@@ -123,8 +123,8 @@ with its control green).
 * **A temporary table of the session that evaluates an assertion can no longer
   change what it reads.** PostgreSQL searches `pg_temp` first for tables whenever
   `search_path` does not name it, and no path here named it. `run()` evaluated
-  the check under the declarer's path (`"$user", public`), so `from cuentas`
-  read the evaluating session's `pg_temp.cuentas`; and `run()` looked the
+  the check under the declarer's path (`"$user", public`), so `from accounts`
+  read the evaluating session's `pg_temp.accounts`; and `run()` looked the
   assertion up with `FROM assertions`, so a temporary `assertions` with a forged
   row -- a failing assertion's name, the id of one that holds -- made it answer
   `holds`. `retire()` and `run_all()` read and wrote `assertions` the same way.

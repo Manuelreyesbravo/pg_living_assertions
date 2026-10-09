@@ -7,7 +7,7 @@
 --
 -- Up to 0.5.7 a check ran with the privileges of whoever called run() -- usually a cron job
 -- owned by someone with more rights than whoever wrote the check. The README said so, and
--- test/privilegios.sh demonstrated it: a trusted role's check, run by the owner, read the
+-- test/privileges.sh demonstrated it: a trusted role's check, run by the owner, read the
 -- owner's secret. The seal (read-only, always rolled back) bounded writes to the database
 -- and nothing else, and an external audit measured what that leaves (F9, F6; and the same
 -- class in pg_plan_guard, PG-S1): COPY ... TO PROGRAM is a read, so a check ran a program as

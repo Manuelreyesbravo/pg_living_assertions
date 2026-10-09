@@ -63,7 +63,7 @@ cluster-stop:
 
 .PHONY: check-privs
 check-privs:
-	@PSQL=$(shell $(PG_CONFIG) --bindir)/psql bash ./test/privilegios.sh
+	@PSQL=$(shell $(PG_CONFIG) --bindir)/psql bash ./test/privileges.sh
 
 # Can a temporary table of the session that evaluates change what an assertion
 # reads? It could, through pg_temp, until 0.5.5. Like check-privs, it needs a

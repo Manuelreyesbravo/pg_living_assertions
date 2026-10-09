@@ -337,7 +337,7 @@ Measured on 2026-09-16, not assumed: `make installcheck` was run against each
 of these releases, every one in a container of the official image for that
 version (19beta2 is a local build).
 
-`test/matriz.sh` re-runs the whole table in containers of the official images, and **PG 10 is
+`test/matrix.sh` re-runs the whole table in containers of the official images, and **PG 10 is
 its control**: 10 must fail, because the triggers use `EXECUTE FUNCTION`. A run where 10 passes
 is reported as not measuring what it claims to.
 
@@ -379,9 +379,9 @@ different version than this repo declares**.
 run against the throwaway cluster of `test/cluster.sh` and not against whatever
 server the environment points at. Until this was written, their headers
 documented running them with `PGPORT` aimed at a real server, their names were
-generic (`vigilante`, `la_dumpeada`), and they dropped those names on the way
-in: anyone with a monitoring role called `vigilante` would have lost it, grants
-included, by following this page. The author ran them against a production
+generic words -- a role named after a watcher, a database named after a dump --
+and they dropped those names on the way in: anyone with a monitoring role of that
+name would have lost it, grants included, by following this page. The author ran them against a production
 cluster and left a database behind, which is how it was found.
 
 Three things guard that now, and the third is the one that holds if you point
@@ -417,8 +417,8 @@ seen in use in 35 of about 7,300 runs, and pinned by `test/sql/recorded_path.sql
 
 **0.5.5 fixes a temporary table changing what an assertion reads.** PostgreSQL
 searches `pg_temp` first for tables when `search_path` does not name it, and no
-path here named it: a check's `from cuentas` read the evaluating session's
-`pg_temp.cuentas`, and a temporary `assertions` with a forged row made `run()`
+path here named it: a check's `from accounts` read the evaluating session's
+`pg_temp.accounts`, and a temporary `assertions` with a forged row made `run()`
 answer `holds` for a failing assertion. It matters when the check runs in someone
 else's session with the owner's rights -- a `SECURITY DEFINER` caller such as
 pg_agent_gate. Measured on 0.5.4 and pinned by `test/pg_temp.sh`. Every function

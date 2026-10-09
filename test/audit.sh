@@ -37,11 +37,11 @@
 #       so a path set with SET cannot show it; set_config() stores it as written.
 #
 # Creates and drops roles and a database: runs against the throwaway cluster of
-# test/cluster.sh, like test/privilegios.sh.
+# test/cluster.sh, like test/privileges.sh.
 
 set -euo pipefail
 
-source "$(dirname "${BASH_SOURCE[0]}")/guardia.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/guard.sh"
 
 DB=living_assertions_test_audit
 AUTHOR=living_assertions_test_audit_author
@@ -50,13 +50,13 @@ EDITOR=living_assertions_test_audit_editor
 STRANGER=living_assertions_test_audit_stranger
 failures=0
 
-trap soltar_lo_reclamado EXIT
-exige_cluster
-reclamar_base "$DB"
-reclamar_rol "$AUTHOR"
-reclamar_rol "$WRITER"
-reclamar_rol "$EDITOR"
-reclamar_rol "$STRANGER"
+trap release_claimed EXIT
+require_throwaway_cluster
+claim_database "$DB"
+claim_role "$AUTHOR"
+claim_role "$WRITER"
+claim_role "$EDITOR"
+claim_role "$STRANGER"
 
 check() {
     local what="$1" expected="$2" got="$3"
@@ -198,7 +198,7 @@ check "an unquoted PG_TEMP first in the path does not let a temporary table answ
     "$(as_owner -c "create temp table accounts (balance int)" -c "insert into accounts values (1)" -c "select (living_assertions.run('upper_pg_temp')).state" | tail -1)"
 
 echo "F9/F6: a check runs as the role that declared it"
-PWN="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/.testcluster/la_pwn"
+PWN="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/.testcluster/pwn"
 rm -f "$PWN"
 as_role "$AUTHOR" -q -c "create function evil.cp() returns int language plpgsql volatile as \$\$ begin copy (select 1) to program 'touch $PWN'; return 1; end \$\$" >/dev/null
 check "control: as the superuser, that function runs a program" "ran=t" \
@@ -293,7 +293,7 @@ check "a trailing comment does not either" "holds" "$(as_owner -c "select (livin
 
 echo "upgrade: an installation of 0.5.5 holding rows the new constraints refuse"
 UPGRADE_DB=living_assertions_test_audit_upgrade
-reclamar_base "$UPGRADE_DB"
+claim_database "$UPGRADE_DB"
 upgrade_out=$($PSQL -X -d "$UPGRADE_DB" -tA 2>&1 <<'SQL' || true
 CREATE EXTENSION pg_living_assertions VERSION '0.5.5';
 SELECT living_assertions.declare('old_one', 'declared on 0.5.5', 'select true as holds', p_check_now => false);
