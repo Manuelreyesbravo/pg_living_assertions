@@ -5,6 +5,28 @@ Each upgrade script (`pg_living_assertions--OLD--NEW.sql`) documents, in its own
 header, exactly what changed and why; that is the authoritative per-version
 record.
 
+## 0.5.9 -- 2026-10-09
+
+The Medium and Low findings of the external audit of 0.5.5 left open, each measured on 0.5.8
+first (`test/audit.sh`: every tooth red there with its control green).
+
+* **F8: a fingerprinted value that disappears is `broken`.** `declare_unchanged` compared with
+  `=`, so a value gone to NULL read `unknown`, "not a failure".
+* **F16: `declare_unchanged` approves inside the seal**, read-only and rolled back, under the caller's path with `pg_temp` last: an
+  expression that wrote, wrote at approval. The fingerprint is sha256; assertions already
+  declared keep their md5 check.
+* **F12: the server dates an assertion and a check**, and an assertion is not inserted already
+  retired: a backdated successor vanished from `renegotiated`, and a check row could carry any
+  date. A superuser keeps what it inserts (that is `pg_restore`).
+* **F13: `TRUNCATE` is refused** on both tables.
+* **F14: `state()`, `assert_holds()` and `stale()` run as the owner**, so anyone given the
+  schema reads a verdict, as the README said; the tables stay closed.
+* **Retiring or replacing an assertion is for its author** (or a role that may act as it): a tenant with UPDATE replaced the DBA's watch with `select true` (external audit of pg_grammar_guard, GG-07).
+* **F17:** every installation documents `assertions.search_path`.
+* **F18:** a trailing `;` or `--` comment no longer makes a check `erroring` forever.
+* **F19:** README corrections -- seven answers, not six; the seal's limits as they are since
+  0.5.8; which functions pin a path.
+
 ## 0.5.8 -- 2026-10-09
 
 * **A check runs as the role that declared it** (external audit: F9, F6; the same class

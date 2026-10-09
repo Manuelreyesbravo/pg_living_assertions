@@ -15,7 +15,8 @@ DATA         = pg_living_assertions--0.1.0.sql \
                pg_living_assertions--0.5.4--0.5.5.sql \
                pg_living_assertions--0.5.5--0.5.6.sql \
                pg_living_assertions--0.5.6--0.5.7.sql \
-               pg_living_assertions--0.5.7--0.5.8.sql
+               pg_living_assertions--0.5.7--0.5.8.sql \
+               pg_living_assertions--0.5.8--0.5.9.sql
 PG_CONFIG   ?= pg_config
 
 # One installcheck, no dependencies -- the same lesson the rest of the family

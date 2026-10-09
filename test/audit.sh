@@ -19,6 +19,13 @@
 #       PROGRAM as whoever ran it, and could leave a session advisory lock behind.
 #   F6  a check that cancelled its own backend aborted run_all() for every assertion.
 #       From 0.5.8 a check runs as the role that declared it.
+#   F8  declare_unchanged: a value that disappeared (NULL) read unknown, "not a failure".
+#   F12 declared_at and a retirement could be written by the author at insert.
+#   F13 TRUNCATE emptied the append-only tables.
+#   F14 state(), assert_holds() and stale() were EXECUTE to PUBLIC and failed for PUBLIC.
+#   F16 declare_unchanged ran its expression at approval outside the seal.
+#   F17 a fresh install lacked the comment an upgraded one has on assertions.search_path.
+#   F18 a trailing `;` or `--` comment in a check made it erroring forever.
 #   F15 a schema name with a comma in it was split by the 0.5.5 path rewrite; and an
 #       unquoted PG_TEMP was not recognised as pg_temp. SET stores the path lower-cased,
 #       so a path set with SET cannot show it; set_config() stores it as written.
@@ -34,6 +41,7 @@ DB=living_assertions_test_audit
 AUTHOR=living_assertions_test_audit_author
 WRITER=living_assertions_test_audit_writer
 EDITOR=living_assertions_test_audit_editor
+STRANGER=living_assertions_test_audit_stranger
 failures=0
 
 trap soltar_lo_reclamado EXIT
@@ -42,6 +50,7 @@ reclamar_base "$DB"
 reclamar_rol "$AUTHOR"
 reclamar_rol "$WRITER"
 reclamar_rol "$EDITOR"
+reclamar_rol "$STRANGER"
 
 check() {
     local what="$1" expected="$2" got="$3"
@@ -131,8 +140,9 @@ check "  ...and the assertion with that path still holds" "holds" \
 echo "F3: a forged row cannot pin a verdict"
 check "control: the assertion is broken" "broken" \
     "$(as_owner -c "select (living_assertions.run('no_negative_balance')).state")"
-check "checked_at = 'infinity' is refused" "violates check constraint" \
-    "$(as_role "$WRITER" -c "insert into living_assertions.checks (assertion, state, detail, checked_at) select id, 'holds', 'forged', 'infinity' from living_assertions.assertions where name = 'no_negative_balance'" 2>&1)"
+as_role "$WRITER" -c "insert into living_assertions.checks (assertion, state, detail, checked_at) select id, 'holds', 'forged', 'infinity' from living_assertions.assertions where name = 'no_negative_balance'" >/dev/null 2>&1
+check "a row dated 'infinity' by the writer is dated by the server instead" "server_dated=true" \
+    "$(as_owner -c "select 'server_dated=' || (isfinite(checked_at) and checked_at > now() - interval '1 hour') from living_assertions.checks where detail = 'forged' order by id desc limit 1")"
 check "control: a role with INSERT on checks can still write a row" "INSERT 0 1" \
     "$(as_role "$WRITER" -c "insert into living_assertions.checks (assertion, state, detail, checked_at) select id, 'holds', 'forged', '2999-01-01' from living_assertions.assertions where name = 'no_negative_balance'")"
 check "  ...and before the next honest check, it is what state() answers" "holds" \
@@ -155,9 +165,11 @@ check "a retirement's reason is not rewritten" "ERROR" \
 
 echo "F5: retiring and replacing cost a reason, NULL included"
 check "retire() with a NULL reason is refused" "ERROR" \
-    "$(as_role "$EDITOR" -c "select living_assertions.retire('retire_me', NULL)")"
-check "control: retire() with a reason still works" "retired" \
-    "$(as_role "$EDITOR" -c "select living_assertions.retire('retire_me', 'retired on purpose by the test')" ; as_owner -c "select living_assertions.state('retire_me')")"
+    "$(as_owner -c "select living_assertions.retire('retire_me', NULL)")"
+check "GG-07: a role with UPDATE cannot retire an assertion someone else declared" "cannot retire or replace it" \
+    "$(as_role "$EDITOR" -c "select living_assertions.retire('retire_me', 'retired by somebody else')")"
+check "control: its author retires it with a reason" "retired" \
+    "$(as_owner -c "select living_assertions.retire('retire_me', 'retired on purpose by the test')" ; as_owner -c "select living_assertions.state('retire_me')")"
 check "declare(..., supersedes, NULL) is refused" "ERROR" \
     "$(as_owner -c "select living_assertions.declare('zzzz_sorts_last', 'a softer claim of the same', 'select true as holds', 'zzzz_sorts_last', NULL, false)")"
 
@@ -200,6 +212,48 @@ check "a role with INSERT on assertions cannot sign one as the superuser" "canno
     "$(as_role "$AUTHOR" -c "insert into living_assertions.assertions (name, claim, check_sql, declared_by) select 'f9_forged', 'signed as someone else', 'select true as holds', rolname from pg_roles where rolsuper limit 1")"
 check "a SECURITY DEFINER caller cannot run another role's check as itself" "security-definer" \
     "$(as_owner -c "create or replace function public.vouch(p text) returns text language sql security definer set search_path = pg_catalog as \$\$ select (living_assertions.run(p)).detail \$\$" -c "select public.vouch('f9_lock')" | tail -1)"
+
+echo "F8: a fingerprinted value that disappears is broken"
+as_owner -q -c "create table cfg (k text, v text)" -c "insert into cfg values ('mode', 'strict')" \
+    -c "select living_assertions.declare_unchanged('cfg_mode', 'the mode setting is what was approved', \$\$select v from public.cfg where k = 'mode'\$\$)" >/dev/null
+check "control: unchanged, it holds" "holds" "$(as_owner -c "select (living_assertions.run('cfg_mode')).state")"
+check "with the value gone, it is broken" "broken" "$(as_owner -c "delete from cfg" -c "select (living_assertions.run('cfg_mode')).state" | tail -1)"
+
+echo "F12: the server dates an assertion, and it is not born retired"
+as_role "$AUTHOR" -q -c "insert into living_assertions.assertions (name, claim, check_sql, declared_at) values ('backdated', 'an assertion dated in the past', 'select true as holds', '2000-01-01')" >/dev/null
+check "a declared_at given by the author is replaced by the server's" "recent=true" \
+    "$(as_owner -c "select 'recent=' || (declared_at > now() - interval '1 hour') from living_assertions.assertions where name = 'backdated'")"
+check "an assertion inserted already retired is refused" "ERROR" \
+    "$(as_role "$AUTHOR" -c "insert into living_assertions.assertions (name, claim, check_sql, retired_at, retired_why) values ('born_retired', 'retired before it lived', 'select true as holds', now(), 'never watched anything')")"
+
+echo "F13: the append-only tables are not truncated"
+check "TRUNCATE checks is refused" "append-only" "$(as_owner -c "truncate living_assertions.checks")"
+check "TRUNCATE assertions is refused" "append-only" "$(as_owner -c "truncate living_assertions.assertions cascade")"
+check "  ...and the history is still there" "kept=true" "$(as_owner -c "select 'kept=' || (count(*) > 0) from living_assertions.checks")"
+
+echo "F14: reading a verdict is open to anyone given the schema"
+as_owner -q -c "grant usage on schema living_assertions to $STRANGER" >/dev/null
+check "state() for a role with only USAGE" "broken" "$(as_role "$STRANGER" -c "select living_assertions.state('no_negative_balance')")"
+check "stale() for that role" "stale_ok=true" "$(as_role "$STRANGER" -c "select 'stale_ok=' || (count(*) >= 0) from living_assertions.stale('1 second')")"
+check "control: the tables, with every check's SQL and detail, stay closed to it" "permission denied" \
+    "$(as_role "$STRANGER" -c "select count(*) from living_assertions.checks")"
+
+echo "F16: declare_unchanged approves inside the seal"
+as_owner -q -c "create table approval_log (what text)" \
+    -c "create function public.writes_on_approval() returns text language plpgsql as \$\$ begin insert into public.approval_log values ('written during approval'); return 'x'; end \$\$" >/dev/null
+check "control: the function writes when called" "1" "$(as_owner -c "select public.writes_on_approval()" >/dev/null; as_owner -c "select count(*) from approval_log")"
+as_owner -q -c "truncate approval_log" >/dev/null
+check "an expression that writes is refused at approval" "may only read" \
+    "$(as_owner -c "select living_assertions.declare_unchanged('unsealed', 'an expression that writes', \$\$select public.writes_on_approval()\$\$)")"
+check "  ...and wrote nothing" "0" "$(as_owner -c "select count(*) from approval_log")"
+
+echo "F17 and F18"
+check "a fresh install documents assertions.search_path" "documented=true" \
+    "$(as_owner -c "select 'documented=' || (col_description('living_assertions.assertions'::regclass, (select attnum from pg_attribute where attrelid = 'living_assertions.assertions'::regclass and attname = 'search_path')) is not null)")"
+as_owner -q -c "select living_assertions.declare('trailing_semicolon', 'a check that ends in a semicolon', 'select true as holds;', p_check_now => false)" \
+     -c "select living_assertions.declare('trailing_comment', 'a check that ends in a comment', 'select true as holds -- why', p_check_now => false)" >/dev/null
+check "a trailing semicolon does not make a check erroring" "holds" "$(as_owner -c "select (living_assertions.run('trailing_semicolon')).state")"
+check "a trailing comment does not either" "holds" "$(as_owner -c "select (living_assertions.run('trailing_comment')).state")"
 
 echo "upgrade: an installation of 0.5.5 holding rows the new constraints refuse"
 UPGRADE_DB=living_assertions_test_audit_upgrade

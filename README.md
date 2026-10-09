@@ -67,7 +67,7 @@ The check must return **one row** with a boolean column `holds`, and optionally
 a text column `detail`. Re-run everything with `living_assertions.run_all()`,
 or one with `living_assertions.run(name)`.
 
-## Six answers, and the extra ones are the point
+## Seven answers, and the extra ones are the point
 
 | state | means |
 |---|---|
@@ -154,7 +154,11 @@ whose last word was `broken` is the case worth seeing, and it is labelled
 `REPLACED WHILE BROKEN`.
 
 The check log is append-only for the same reason. If it could be edited, the
-declaration date would protect nothing.
+declaration date would protect nothing. Since 0.5.9 the server dates both an
+assertion and a check -- a role that may write a row cannot choose when it says it
+happened -- and `TRUNCATE` is refused on both tables. A superuser keeps what it
+inserts, which is how `pg_restore` brings a registry back; a superuser can also
+disable the triggers. That is outside what an extension can stop.
 
 ## The stored SQL runs sealed
 
@@ -182,8 +186,11 @@ tried a direct `INSERT` -- the one case `STABLE` does catch. `test/sql/read_only
 now tries all of them, and it failed on 0.4.1 before 0.5.0 was written. Measured
 cost of the seal: none distinguishable, about 24 µs per `run()` either way.
 
-What it still does **not** stop is listed under *What it does not do*, and each
-item is pinned by the same test, so the list is a tested fact rather than a hope.
+What it still does **not** stop is listed under *What it does not do*. Until
+0.5.8 that list missed what a rollback cannot undo and read-only does not refuse --
+`COPY ... TO PROGRAM`, `pg_switch_wal()` -- run with the caller's rights; since
+0.5.8 a check runs as the role that declared it, so it can do only what its author
+could.
 
 A check that returns more than one row is also `erroring`, not answered with the
 first one. `EXECUTE ... INTO` keeps the first row without complaining, which
@@ -290,13 +297,12 @@ honest check. Grant `INSERT` on `checks` only to roles you trust to run them.
   its assertions turn `erroring` rather than vanishing. That is the right
   direction -- loud beats silent -- but it means orphans need retiring by hand.
 - **`unknown` is not a diagnosis.** It says the check could not decide, not why.
-- **The seal has three known gaps**, all things a rollback cannot undo and
-  read-only does not refuse: a `nextval()` on a **temporary** sequence, a
-  **session-level** advisory lock, and anything that leaves the transaction --
-  `dblink`, a foreign data wrapper, a function in an untrusted language that
-  writes a file. The first two are pinned by `test/sql/read_only.sql`. This is
-  why declaring an assertion is a privilege (below): the seal limits what a
-  trusted author can break by mistake, it does not make an untrusted one safe.
+- **The seal does not undo what leaves the transaction**: a `nextval()` on a
+  **temporary** sequence, `dblink`, a foreign data wrapper, a function in an
+  untrusted language that writes a file, `COPY ... TO PROGRAM`. A session-level
+  advisory lock is released when the seal ends (0.5.8). Since 0.5.8 a check runs as
+  the role that declared it, so whatever it reaches, it reaches with its author's
+  rights and not the caller's; declaring an assertion is still a privilege (below).
 
 ## Tested on
 
@@ -371,10 +377,9 @@ Pure SQL: no shared library, no dependencies. The database that most needs its
 guarantees audited is usually the one where getting a C extension approved is
 hardest.
 
-Distribution 0.5.1 provides extension 0.5.1. An existing installation moves
-with `ALTER EXTENSION pg_living_assertions UPDATE TO '0.5.1'`: from 0.4.1 it
-replaces the evaluator (0.5.0) and `run()` (0.5.1), with no table changes, and
-every recorded verdict stays.
+An existing installation moves with `ALTER EXTENSION pg_living_assertions
+UPDATE`; every recorded verdict stays. Each upgrade script says, in its header,
+what it changes.
 
 **0.5.1 fixes a `run()` that could fail with `type "checks" does not exist`.**
 It switches to the assertion's recorded `search_path` and its row variables
@@ -389,8 +394,10 @@ path here named it: a check's `from cuentas` read the evaluating session's
 `pg_temp.cuentas`, and a temporary `assertions` with a forged row made `run()`
 answer `holds` for a failing assertion. It matters when the check runs in someone
 else's session with the owner's rights -- a `SECURITY DEFINER` caller such as
-pg_agent_gate. Measured on 0.5.4 and pinned by `test/pg_temp.sh`. Every
-function now names `pg_temp` last; no table changes, every recorded verdict stays.
+pg_agent_gate. Measured on 0.5.4 and pinned by `test/pg_temp.sh`. Every function
+with a pinned path names `pg_temp` last; `declare()` and `declare_unchanged()` keep
+none on purpose -- they record the caller's -- and the evaluator applies an
+assertion's own path, with `pg_temp` moved last, only inside the seal.
 
 **0.5.6 closes an external audit of 0.5.5** (`test/audit.sh`, `make check-audit`,
 every tooth red on 0.5.5 with its control green). `run()` left the assertion's
