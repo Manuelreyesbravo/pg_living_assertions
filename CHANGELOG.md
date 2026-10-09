@@ -5,6 +5,12 @@ Each upgrade script (`pg_living_assertions--OLD--NEW.sql`) documents, in its own
 header, exactly what changed and why; that is the authoritative per-version
 record.
 
+## 0.5.7 -- 2026-10-08
+
+* **Metadata only.** The PGXN description is two sentences now; the longer
+  explanation it carried is in this README. No code changed: the upgrade
+  script 0.5.6 -> 0.5.7 changes no object.
+
 ## 0.5.6 -- 2026-10-08
 
 From an external audit of 0.5.5, each finding measured on 0.5.5 before it was changed
